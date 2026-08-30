@@ -17,7 +17,7 @@ export const getNextTaskTool = (server: McpServer, taskService: TaskService): vo
         logger.info(`[${TOOL_NAME}] Received request with args:`, args);
         try {
             // Call the service method to get the next task
-            const nextTask = await taskService.getNextTask(args.project_id);
+            const nextTask = await taskService.getNextTask(args.project_id, args.sprint_id);
 
             // Format the successful response
             if (nextTask) {

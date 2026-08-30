@@ -11,12 +11,24 @@ export type TaskStatus = 'todo' | 'in-progress' | 'review' | 'done';
 export type TaskPriority = 'high' | 'medium' | 'low';
 
 /**
+ * Represents the hierarchy level of a work item.
+ */
+export type WorkItemType = 'epic' | 'story' | 'task';
+
+/**
+ * Represents the possible lifecycle values for a sprint.
+ */
+export type SprintStatus = 'planned' | 'active' | 'closed';
+
+/**
  * Interface representing a Task object as returned by the API.
  */
 export interface Task {
     task_id: string; // UUID format
     project_id: string; // UUID format
     parent_task_id: string | null; // UUID format or null
+    sprint_id: string | null; // UUID format or null
+    item_type: WorkItemType;
     description: string;
     status: TaskStatus;
     priority: TaskPriority;
@@ -34,6 +46,8 @@ export interface TaskUpdatePayload {
     description?: string;
     priority?: TaskPriority;
     dependencies?: string[]; // Represents the complete new list of dependencies
+    parent_task_id?: string | null;
+    sprint_id?: string | null;
 }
 
 /**
@@ -44,6 +58,8 @@ export interface TaskDbObject {
     task_id: string;
     project_id: string;
     parent_task_id: string | null;
+    sprint_id: string | null;
+    item_type: WorkItemType;
     description: string;
     status: TaskStatus;
     priority: TaskPriority;
@@ -57,4 +73,19 @@ export interface TaskDbObject {
 export interface TaskDependencyDbObject {
     task_id: string;
     depends_on_task_id: string;
+}
+
+/**
+ * Interface representing a Sprint object as returned by the API.
+ */
+export interface Sprint {
+    sprint_id: string;
+    project_id: string;
+    name: string;
+    goal: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    status: SprintStatus;
+    created_at: string;
+    updated_at: string;
 }

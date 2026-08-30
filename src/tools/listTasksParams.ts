@@ -11,6 +11,7 @@ Returns an array of task objects.
 
 // Re-use enum from addTaskParams or define locally if preferred
 const TaskStatusEnum = z.enum(['todo', 'in-progress', 'review', 'done']);
+const WorkItemTypeEnum = z.enum(['epic', 'story', 'task']);
 
 // Zod schema for the parameters, matching FR-003 and listTasksTool.md spec
 export const TOOL_PARAMS = z.object({
@@ -21,6 +22,22 @@ export const TOOL_PARAMS = z.object({
     status: TaskStatusEnum
         .optional()
         .describe("Optional filter to return only tasks matching the specified status."), // Optional, enum
+
+    item_type: WorkItemTypeEnum
+        .optional()
+        .describe("Optional filter to return only epics, stories, or tasks."),
+
+    sprint_id: z.string()
+        .uuid("The sprint_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional filter to return work items assigned to a sprint. Pass null for unscheduled items."),
+
+    parent_task_id: z.string()
+        .uuid("The parent_task_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional filter to return work items under a specific parent. Pass null for root items."),
 
     include_subtasks: z.boolean()
         .optional()

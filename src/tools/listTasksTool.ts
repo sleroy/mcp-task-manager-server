@@ -20,6 +20,9 @@ export const listTasksTool = (server: McpServer, taskService: TaskService): void
             const tasks = await taskService.listTasks({
                 project_id: args.project_id,
                 status: args.status,
+                item_type: args.item_type,
+                sprint_id: args.sprint_id,
+                parent_task_id: args.parent_task_id,
                 include_subtasks: args.include_subtasks,
             });
 

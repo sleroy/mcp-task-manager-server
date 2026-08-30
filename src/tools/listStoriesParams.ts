@@ -1,0 +1,24 @@
+import { z } from 'zod';
+
+export const TOOL_NAME = "listStories";
+
+export const TOOL_DESCRIPTION = `
+Lists stories in a project, optionally scoped to an epic or sprint.
+`;
+
+const TaskStatusEnum = z.enum(['todo', 'in-progress', 'review', 'done']);
+
+export const TOOL_PARAMS = z.object({
+    project_id: z.string().uuid("The project_id must be a valid UUID.")
+        .describe("The unique identifier (UUID) of the project whose stories should be listed."),
+    epic_id: z.string().uuid("The epic_id must be a valid UUID.").optional()
+        .describe("Optional epic whose stories should be listed."),
+    sprint_id: z.string().uuid("The sprint_id must be a valid UUID.").optional()
+        .describe("Optional sprint whose stories should be listed."),
+    status: TaskStatusEnum.optional()
+        .describe("Optional story status filter."),
+    include_subtasks: z.boolean().optional().default(true)
+        .describe("Optional flag to include nested tasks. Defaults to true."),
+});
+
+export type ListStoriesArgs = z.infer<typeof TOOL_PARAMS>;

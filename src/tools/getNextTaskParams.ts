@@ -15,6 +15,11 @@ export const TOOL_PARAMS = z.object({
     project_id: z.string()
         .uuid("The project_id must be a valid UUID.")
         .describe("The unique identifier (UUID) of the project to find the next task for."), // Required, UUID format
+
+    sprint_id: z.string()
+        .uuid("The sprint_id must be a valid UUID.")
+        .optional()
+        .describe("Optional sprint ID. If omitted, the most recent active sprint is used when one exists; otherwise the next project-level task is returned."),
 });
 
 // Define the expected type for arguments based on the Zod schema

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Database as Db } from 'better-sqlite3'; // Import Db type
 import { ProjectRepository, ProjectData } from '../repositories/ProjectRepository.js';
 import { TaskRepository, TaskData, DependencyData } from '../repositories/TaskRepository.js';
+import { SprintData, SprintRepository } from '../repositories/SprintRepository.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js'; // Import errors
 
@@ -13,6 +14,7 @@ interface ExportTask extends TaskData {
 
 interface ExportData {
     project_metadata: ProjectData;
+    sprints?: SprintData[];
     tasks: ExportTask[]; // Root tasks
 }
 
@@ -20,16 +22,19 @@ interface ExportData {
 export class ProjectService {
     private projectRepository: ProjectRepository;
     private taskRepository: TaskRepository;
+    private sprintRepository: SprintRepository;
     private db: Db; // Add db instance
 
     constructor(
         db: Db, // Inject Db instance
         projectRepository: ProjectRepository,
-        taskRepository: TaskRepository
+        taskRepository: TaskRepository,
+        sprintRepository: SprintRepository
     ) {
         this.db = db; // Store db instance
         this.projectRepository = projectRepository;
         this.taskRepository = taskRepository;
+        this.sprintRepository = sprintRepository;
     }
 
     /**
@@ -88,6 +93,7 @@ export class ProjectService {
         try {
             const allTasks = this.taskRepository.findAllTasksForProject(projectId);
             const allDependencies = this.taskRepository.findAllDependenciesForProject(projectId);
+            const sprints = this.sprintRepository.findAllForProject(projectId);
 
             const taskMap: Map<string, ExportTask> = new Map();
             const rootTasks: ExportTask[] = [];
@@ -121,6 +127,7 @@ export class ProjectService {
 
             const exportData: ExportData = {
                 project_metadata: projectMetadata,
+                sprints,
                 tasks: rootTasks,
             };
 
@@ -171,6 +178,23 @@ export class ProjectService {
             logger.info(`[ProjectService] Created new project ${newProjectId} for import.`);
 
             const idMap = new Map<string, string>();
+            const sprintIdMap = new Map<string, string>();
+            for (const sprint of importData.sprints ?? []) {
+                const newSprintId = uuidv4();
+                sprintIdMap.set(sprint.sprint_id, newSprintId);
+                this.sprintRepository.create({
+                    sprint_id: newSprintId,
+                    project_id: newProjectId,
+                    name: sprint.name,
+                    goal: sprint.goal ?? null,
+                    start_date: sprint.start_date ?? null,
+                    end_date: sprint.end_date ?? null,
+                    status: sprint.status,
+                    created_at: sprint.created_at,
+                    updated_at: sprint.updated_at,
+                });
+            }
+
             const processTask = (task: ExportTask, parentDbId: string | null) => {
                 const newTaskId = uuidv4();
                 idMap.set(task.task_id, newTaskId);
@@ -178,6 +202,8 @@ export class ProjectService {
                     task_id: newTaskId,
                     project_id: newProjectId,
                     parent_task_id: parentDbId,
+                    sprint_id: task.sprint_id ? sprintIdMap.get(task.sprint_id) ?? null : null,
+                    item_type: task.item_type ?? 'task',
                     description: task.description,
                     status: task.status,
                     priority: task.priority,

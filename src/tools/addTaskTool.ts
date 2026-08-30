@@ -22,6 +22,9 @@ export const addTaskTool = (server: McpServer, taskService: TaskService): void =
             const newTask = await taskService.addTask({
                 project_id: args.project_id,
                 description: args.description,
+                item_type: args.item_type,
+                parent_task_id: args.parent_task_id,
+                sprint_id: args.sprint_id,
                 dependencies: args.dependencies, // Pass optional fields
                 priority: args.priority,
                 status: args.status,

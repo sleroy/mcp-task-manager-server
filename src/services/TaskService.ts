@@ -1,80 +1,96 @@
+import { Database as Db } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import { ProjectRepository } from '../repositories/ProjectRepository.js';
+import { SprintRepository } from '../repositories/SprintRepository.js';
 import { TaskRepository, TaskData } from '../repositories/TaskRepository.js';
-import { ProjectRepository } from '../repositories/ProjectRepository.js'; // Needed to check project existence
-import { logger } from '../utils/logger.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js'; // Using custom errors
+import { TaskPriority, TaskStatus, WorkItemType } from '../types/taskTypes.js';
+import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
 
-// Define the input structure for adding a task, based on feature spec
 export interface AddTaskInput {
     project_id: string;
     description: string;
+    item_type?: WorkItemType;
+    parent_task_id?: string | null;
+    sprint_id?: string | null;
     dependencies?: string[];
-    priority?: 'high' | 'medium' | 'low';
-    status?: 'todo' | 'in-progress' | 'review' | 'done';
+    priority?: TaskPriority;
+    status?: TaskStatus;
 }
 
-// Options for listing tasks
 export interface ListTasksOptions {
     project_id: string;
-    status?: TaskData['status'];
+    status?: TaskStatus;
+    item_type?: WorkItemType;
+    sprint_id?: string | null;
+    parent_task_id?: string | null;
     include_subtasks?: boolean;
 }
 
-// Type for task data potentially including nested subtasks
 export interface StructuredTaskData extends TaskData {
     subtasks?: StructuredTaskData[];
 }
 
-// Type for full task details including dependencies and subtasks
 export interface FullTaskData extends TaskData {
     dependencies: string[];
-    subtasks: TaskData[]; // For V1 showTask, just return direct subtasks without their own nesting/deps
+    subtasks: TaskData[];
 }
 
-// Input for expanding a task
 export interface ExpandTaskInput {
     project_id: string;
-    task_id: string; // Parent task ID
+    task_id: string;
     subtask_descriptions: string[];
     force?: boolean;
 }
 
+export interface SprintProgress {
+    sprint_id: string;
+    project_id: string;
+    total_items: number;
+    total_tasks: number;
+    done_tasks: number;
+    open_tasks: number;
+    progress_percent: number;
+    by_status: Record<TaskStatus, number>;
+}
 
-import { Database as Db } from 'better-sqlite3'; // Import Db type
-import { ConflictError } from '../utils/errors.js'; // Import ConflictError
+export interface EpicProgress {
+    epic_id: string;
+    project_id: string;
+    total_items: number;
+    total_stories: number;
+    total_tasks: number;
+    done_tasks: number;
+    open_tasks: number;
+    progress_percent: number;
+    by_status: Record<TaskStatus, number>;
+}
 
 export class TaskService {
-    private taskRepository: TaskRepository;
-    private projectRepository: ProjectRepository;
-    private db: Db; // Add db instance
-
     constructor(
-        db: Db, // Inject Db instance
-        taskRepository: TaskRepository,
-        projectRepository: ProjectRepository
-    ) {
-        this.db = db; // Store db instance
-        this.taskRepository = taskRepository;
-        this.projectRepository = projectRepository;
-    }
+        private db: Db,
+        private taskRepository: TaskRepository,
+        private projectRepository: ProjectRepository,
+        private sprintRepository: SprintRepository
+    ) {}
 
-    /**
-     * Adds a new task to a specified project.
-     */
     public async addTask(input: AddTaskInput): Promise<TaskData> {
-        logger.info(`[TaskService] Attempting to add task to project: ${input.project_id}`);
-        const projectExists = this.projectRepository.findById(input.project_id);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${input.project_id}`);
-            throw new NotFoundError(`Project with ID ${input.project_id} not found.`);
-        }
+        this.ensureProjectExists(input.project_id);
+
+        const itemType = input.item_type ?? 'task';
+        const parentTaskId = input.parent_task_id ?? null;
+        const sprintId = input.sprint_id ?? null;
+        this.validateWorkItemPlacement(input.project_id, itemType, parentTaskId, sprintId);
 
         const taskId = uuidv4();
+        this.validateDependencies(input.project_id, taskId, input.dependencies);
+
         const now = new Date().toISOString();
         const newTaskData: TaskData = {
             task_id: taskId,
             project_id: input.project_id,
-            parent_task_id: null,
+            parent_task_id: parentTaskId,
+            sprint_id: sprintId,
+            item_type: itemType,
             description: input.description,
             status: input.status ?? 'todo',
             priority: input.priority ?? 'medium',
@@ -82,390 +98,430 @@ export class TaskService {
             updated_at: now,
         };
 
-        // TODO: Validate Dependency Existence
-
-        try {
-            this.taskRepository.create(newTaskData, input.dependencies);
-            logger.info(`[TaskService] Successfully added task ${taskId} to project ${input.project_id}`);
-            return newTaskData;
-        } catch (error) {
-            logger.error(`[TaskService] Error adding task to project ${input.project_id}:`, error);
-            throw error;
-        }
+        this.taskRepository.create(newTaskData, input.dependencies ?? []);
+        return newTaskData;
     }
 
-    /**
-     * Lists tasks for a project.
-     */
     public async listTasks(options: ListTasksOptions): Promise<TaskData[] | StructuredTaskData[]> {
-        logger.info(`[TaskService] Attempting to list tasks for project: ${options.project_id}`, options);
-        const projectExists = this.projectRepository.findById(options.project_id);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${options.project_id}`);
-            throw new NotFoundError(`Project with ID ${options.project_id} not found.`);
+        this.ensureProjectExists(options.project_id);
+
+        const allTasks = this.taskRepository.findByProjectId(options.project_id, {
+            status: options.status,
+            item_type: options.item_type,
+            sprint_id: options.sprint_id,
+            parent_task_id: options.parent_task_id,
+        });
+
+        if (!options.include_subtasks) {
+            return options.parent_task_id === undefined
+                ? allTasks.filter(task => !task.parent_task_id)
+                : allTasks;
         }
 
-        try {
-            const allTasks = this.taskRepository.findByProjectId(options.project_id, options.status);
-
-            if (!options.include_subtasks) {
-                const topLevelTasks = allTasks.filter(task => !task.parent_task_id);
-                logger.info(`[TaskService] Found ${topLevelTasks.length} top-level tasks for project ${options.project_id}`);
-                return topLevelTasks;
-            } else {
-                const taskMap: Map<string, StructuredTaskData> = new Map();
-                const rootTasks: StructuredTaskData[] = [];
-                for (const task of allTasks) {
-                    taskMap.set(task.task_id, { ...task, subtasks: [] });
-                }
-                for (const task of allTasks) {
-                    if (task.parent_task_id && taskMap.has(task.parent_task_id)) {
-                        const parent = taskMap.get(task.parent_task_id)!;
-                        parent.subtasks!.push(taskMap.get(task.task_id)!);
-                    } else if (!task.parent_task_id) {
-                        rootTasks.push(taskMap.get(task.task_id)!);
-                    }
-                }
-                logger.info(`[TaskService] Found ${rootTasks.length} structured root tasks for project ${options.project_id}`);
-                return rootTasks;
-            }
-        } catch (error) {
-            logger.error(`[TaskService] Error listing tasks for project ${options.project_id}:`, error);
-            throw error;
-        }
+        return this.structureTasks(allTasks, options.parent_task_id !== undefined);
     }
 
-    /**
-     * Retrieves the full details of a single task.
-     */
+    public async listEpics(projectId: string, status?: TaskStatus, includeSubtasks = true): Promise<TaskData[] | StructuredTaskData[]> {
+        this.ensureProjectExists(projectId);
+        const allTasks = this.taskRepository.findAllTasksForProject(projectId);
+        const epicIds = new Set(
+            allTasks
+                .filter(task => task.item_type === 'epic' && (status === undefined || task.status === status))
+                .map(task => task.task_id)
+        );
+
+        if (!includeSubtasks) {
+            return allTasks.filter(task => epicIds.has(task.task_id));
+        }
+
+        const requiredIds = new Set(epicIds);
+        for (const epicId of epicIds) {
+            for (const descendant of this.taskRepository.findDescendants(projectId, epicId)) {
+                requiredIds.add(descendant.task_id);
+            }
+        }
+
+        return this.structureTasks(allTasks.filter(task => requiredIds.has(task.task_id)), false);
+    }
+
+    public async listStories(options: {
+        project_id: string;
+        epic_id?: string;
+        sprint_id?: string;
+        status?: TaskStatus;
+        include_subtasks?: boolean;
+    }): Promise<TaskData[] | StructuredTaskData[]> {
+        this.ensureProjectExists(options.project_id);
+        const allTasks = this.taskRepository.findAllTasksForProject(options.project_id);
+        const stories = allTasks.filter(task =>
+            task.item_type === 'story' &&
+            (options.status === undefined || task.status === options.status) &&
+            (options.epic_id === undefined || task.parent_task_id === options.epic_id) &&
+            (options.sprint_id === undefined || task.sprint_id === options.sprint_id)
+        );
+
+        if (!options.include_subtasks) {
+            return stories;
+        }
+
+        const requiredIds = new Set(stories.map(story => story.task_id));
+        for (const story of stories) {
+            for (const descendant of this.taskRepository.findDescendants(options.project_id, story.task_id)) {
+                requiredIds.add(descendant.task_id);
+            }
+        }
+
+        return this.structureTasks(allTasks.filter(task => requiredIds.has(task.task_id)), true);
+    }
+
     public async getTaskById(projectId: string, taskId: string): Promise<FullTaskData> {
-        logger.info(`[TaskService] Attempting to get task ${taskId} for project ${projectId}`);
         const task = this.taskRepository.findById(projectId, taskId);
         if (!task) {
-            logger.warn(`[TaskService] Task ${taskId} not found in project ${projectId}`);
             throw new NotFoundError(`Task with ID ${taskId} not found in project ${projectId}.`);
         }
 
-        try {
-            const dependencies = this.taskRepository.findDependencies(taskId);
-            const subtasks = this.taskRepository.findSubtasks(taskId);
-            const fullTaskData: FullTaskData = {
-                ...task,
-                dependencies: dependencies,
-                subtasks: subtasks,
-            };
-            logger.info(`[TaskService] Successfully retrieved task ${taskId}`);
-            return fullTaskData;
-        } catch (error) {
-            logger.error(`[TaskService] Error retrieving details for task ${taskId}:`, error);
-            throw error;
-        }
+        return {
+            ...task,
+            dependencies: this.taskRepository.findDependencies(taskId),
+            subtasks: this.taskRepository.findSubtasks(taskId),
+        };
     }
 
-    /**
-     * Sets the status for one or more tasks within a project.
-     */
-    public async setTaskStatus(projectId: string, taskIds: string[], status: TaskData['status']): Promise<number> {
-        logger.info(`[TaskService] Attempting to set status to '${status}' for ${taskIds.length} tasks in project ${projectId}`);
-        const projectExists = this.projectRepository.findById(projectId);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${projectId}`);
-            throw new NotFoundError(`Project with ID ${projectId} not found.`);
-        }
+    public async setTaskStatus(projectId: string, taskIds: string[], status: TaskStatus): Promise<number> {
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, taskIds);
+        return this.taskRepository.updateStatus(projectId, taskIds, status, new Date().toISOString());
+    }
 
-        const existenceCheck = this.taskRepository.checkTasksExist(projectId, taskIds);
-        if (!existenceCheck.allExist) {
-            logger.warn(`[TaskService] One or more tasks not found in project ${projectId}:`, existenceCheck.missingIds);
-            throw new NotFoundError(`One or more tasks not found in project ${projectId}: ${existenceCheck.missingIds.join(', ')}`);
-        }
+    public async closeTask(projectId: string, taskId: string, includeSubtasks = true): Promise<{ closed_count: number; task_ids: string[] }> {
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, [taskId]);
 
-        try {
-            const now = new Date().toISOString();
-            const updatedCount = this.taskRepository.updateStatus(projectId, taskIds, status, now);
-            if (updatedCount !== taskIds.length) {
-                logger.warn(`[TaskService] Expected to update ${taskIds.length} tasks, but ${updatedCount} were affected.`);
-            }
-            logger.info(`[TaskService] Successfully updated status for ${updatedCount} tasks in project ${projectId}`);
-            return updatedCount;
-        } catch (error) {
-            logger.error(`[TaskService] Error setting status for tasks in project ${projectId}:`, error);
-            throw error;
-        }
-}
+        const taskIds = includeSubtasks
+            ? [taskId, ...this.taskRepository.findDescendants(projectId, taskId).map(task => task.task_id)]
+            : [taskId];
+        const closedCount = this.taskRepository.updateStatus(projectId, taskIds, 'done', new Date().toISOString());
+        return { closed_count: closedCount, task_ids: taskIds };
+    }
 
-
-    /**
-     * Expands a parent task by adding new subtasks.
-     * Optionally deletes existing subtasks first if 'force' is true.
-     * Uses a transaction to ensure atomicity.
-     * @param input - Details including parent task ID, project ID, subtask descriptions, and force flag.
-     * @returns The updated parent task details (including new subtasks).
-     * @throws {NotFoundError} If the project or parent task is not found.
-     * @throws {ConflictError} If subtasks exist and force is false.
-     * @throws {Error} If the database operation fails.
-     */
     public async expandTask(input: ExpandTaskInput): Promise<FullTaskData> {
-        const { project_id, task_id: parentTaskId, subtask_descriptions, force = false } = input;
-        logger.info(`[TaskService] Attempting to expand task ${parentTaskId} in project ${project_id} with ${subtask_descriptions.length} subtasks (force=${force})`);
+        this.ensureProjectExists(input.project_id);
 
-        // Use a transaction for the entire operation
         const expandTransaction = this.db.transaction(() => {
-            // 1. Validate Parent Task Existence (within the transaction)
-            const parentTask = this.taskRepository.findById(project_id, parentTaskId);
+            const parentTask = this.taskRepository.findById(input.project_id, input.task_id);
             if (!parentTask) {
-                logger.warn(`[TaskService] Parent task ${parentTaskId} not found in project ${project_id}`);
-                throw new NotFoundError(`Parent task with ID ${parentTaskId} not found in project ${project_id}.`);
+                throw new NotFoundError(`Parent task with ID ${input.task_id} not found in project ${input.project_id}.`);
             }
 
-            // 2. Check for existing subtasks
-            const existingSubtasks = this.taskRepository.findSubtasks(parentTaskId);
-
-            // 3. Handle existing subtasks based on 'force' flag
+            const existingSubtasks = this.taskRepository.findSubtasks(input.task_id);
+            if (existingSubtasks.length > 0 && !input.force) {
+                throw new ConflictError(`Task ${input.task_id} already has subtasks. Use force=true to replace them.`);
+            }
             if (existingSubtasks.length > 0) {
-                if (!force) {
-                    logger.warn(`[TaskService] Conflict: Task ${parentTaskId} already has subtasks and force=false.`);
-                    throw new ConflictError(`Task ${parentTaskId} already has subtasks. Use force=true to replace them.`);
-                } else {
-                    logger.info(`[TaskService] Force=true: Deleting ${existingSubtasks.length} existing subtasks for parent ${parentTaskId}.`);
-                    this.taskRepository.deleteSubtasks(parentTaskId);
-                    // Note: Dependencies of deleted subtasks are implicitly handled by ON DELETE CASCADE in schema
-                }
+                this.taskRepository.deleteSubtasks(input.task_id);
             }
 
-            // 4. Create new subtasks
             const now = new Date().toISOString();
-            const createdSubtasks: TaskData[] = [];
-            for (const description of subtask_descriptions) {
-                const subtaskId = uuidv4();
-                const newSubtaskData: TaskData = {
-                    task_id: subtaskId,
-                    project_id: project_id,
-                    parent_task_id: parentTaskId,
-                    description: description, // Assuming length validation done by Zod
-                    status: 'todo', // Default status
-                    priority: 'medium', // Default priority
+            const createdSubtasks = input.subtask_descriptions.map(description => {
+                const subtask: TaskData = {
+                    task_id: uuidv4(),
+                    project_id: input.project_id,
+                    parent_task_id: input.task_id,
+                    sprint_id: parentTask.sprint_id ?? null,
+                    item_type: 'task',
+                    description,
+                    status: 'todo',
+                    priority: 'medium',
                     created_at: now,
                     updated_at: now,
                 };
-                // Use the repository's create method (which handles its own transaction part for task+deps, but is fine here)
-                // We pass an empty array for dependencies as expandTask doesn't set them for new subtasks
-                this.taskRepository.create(newSubtaskData, []);
-                createdSubtasks.push(newSubtaskData);
-            }
+                this.taskRepository.create(subtask, []);
+                return subtask;
+            });
 
-            // 5. Fetch updated parent task details (including new subtasks and existing dependencies)
-            // We re-fetch to get the consistent state after the transaction commits.
-            // Note: This requires the transaction function to return the necessary data.
-            // Alternatively, construct the FullTaskData manually here. Let's construct manually.
-            const dependencies = this.taskRepository.findDependencies(parentTaskId); // Fetch parent's dependencies
-            const finalParentData: FullTaskData = {
-                ...parentTask, // Use data fetched at the start of transaction
-                updated_at: now, // Update timestamp conceptually (though not saved unless status changes)
-                dependencies: dependencies,
-                subtasks: createdSubtasks, // Return the newly created subtasks
+            return {
+                ...parentTask,
+                dependencies: this.taskRepository.findDependencies(input.task_id),
+                subtasks: createdSubtasks,
             };
-            return finalParentData;
         });
 
-        try {
-            // Execute the transaction
-            const result = expandTransaction();
-            logger.info(`[TaskService] Successfully expanded task ${parentTaskId} with ${subtask_descriptions.length} new subtasks.`);
-            return result;
-        } catch (error) {
-            logger.error(`[TaskService] Error expanding task ${parentTaskId}:`, error);
-            // Re-throw specific errors or generic internal error
-            if (error instanceof NotFoundError || error instanceof ConflictError) {
-                throw error;
-            }
-            throw new Error(`Failed to expand task: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
+        return expandTransaction();
     }
 
+    public async getNextTask(projectId: string, sprintId?: string): Promise<FullTaskData | null> {
+        this.ensureProjectExists(projectId);
+        let selectedSprintId = sprintId;
 
-    /**
-     * Finds the next available task based on readiness (status 'todo', dependencies 'done')
-     * and prioritization (priority, creation date).
-     * @param projectId - The project ID.
-     * @returns The full details of the next task, or null if no task is ready.
-     * @throws {NotFoundError} If the project is not found.
-     * @throws {Error} If the database operation fails.
-     */
-    public async getNextTask(projectId: string): Promise<FullTaskData | null> {
-        logger.info(`[TaskService] Attempting to get next task for project ${projectId}`);
-
-        // 1. Validate Project Existence
-        const projectExists = this.projectRepository.findById(projectId);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${projectId}`);
-            throw new NotFoundError(`Project with ID ${projectId} not found.`);
+        if (!selectedSprintId) {
+            selectedSprintId = this.sprintRepository.findMostRecentActive(projectId)?.sprint_id;
+        } else if (!this.sprintRepository.findById(projectId, selectedSprintId)) {
+            throw new NotFoundError(`Sprint with ID ${selectedSprintId} not found in project ${projectId}.`);
         }
 
-        // 2. Find ready tasks using the repository method
-        try {
-            const readyTasks = this.taskRepository.findReadyTasks(projectId);
-
-            if (readyTasks.length === 0) {
-                logger.info(`[TaskService] No ready tasks found for project ${projectId}`);
-                return null; // No task is ready
-            }
-
-            // 3. The first task in the list is the highest priority one due to repo ordering
-            const nextTask = readyTasks[0];
-            logger.info(`[TaskService] Next task identified: ${nextTask.task_id}`);
-
-            // 4. Fetch full details (dependencies, subtasks) for the selected task
-            // We could potentially optimize this if findReadyTasks returned more details,
-            // but for separation of concerns, we call getTaskById logic (or similar).
-            // Re-using getTaskById logic:
-            return await this.getTaskById(projectId, nextTask.task_id);
-
-        } catch (error) {
-            logger.error(`[TaskService] Error getting next task for project ${projectId}:`, error);
-            throw error; // Re-throw repository or other errors
+        const readyTasks = this.taskRepository.findReadyTasks(projectId, selectedSprintId);
+        if (readyTasks.length === 0) {
+            return null;
         }
+
+        return this.getTaskById(projectId, readyTasks[0].task_id);
     }
 
-    /**
-     * Updates specific fields of an existing task.
-     * @param input - Contains project ID, task ID, and optional fields to update.
-     * @returns The full details of the updated task.
-     * @throws {ValidationError} If no update fields are provided or if dependencies are invalid.
-     * @throws {NotFoundError} If the project, task, or any specified dependency task is not found.
-     * @throws {Error} If the database operation fails.
-     */
     public async updateTask(input: {
         project_id: string;
         task_id: string;
         description?: string;
-        priority?: TaskData['priority'];
+        priority?: TaskPriority;
+        parent_task_id?: string | null;
+        sprint_id?: string | null;
         dependencies?: string[];
     }): Promise<FullTaskData> {
-        const { project_id, task_id } = input;
-        logger.info(`[TaskService] Attempting to update task ${task_id} in project ${project_id}`);
-
-        // 1. Validate that at least one field is being updated
-        if (input.description === undefined && input.priority === undefined && input.dependencies === undefined) {
-            throw new ValidationError("At least one field (description, priority, or dependencies) must be provided for update.");
+        if (
+            input.description === undefined &&
+            input.priority === undefined &&
+            input.parent_task_id === undefined &&
+            input.sprint_id === undefined &&
+            input.dependencies === undefined
+        ) {
+            throw new ValidationError('At least one field (description, priority, parent_task_id, sprint_id, or dependencies) must be provided for update.');
         }
 
-        // 2. Validate Project Existence (using repo method)
-        const projectExists = this.projectRepository.findById(project_id);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${project_id}`);
-            throw new NotFoundError(`Project with ID ${project_id} not found.`);
-        }
-
-        // 3. Validate Task Existence (using repo method - findById also implicitly checks project scope)
-        // We need the task data anyway if dependencies are involved, so fetch it now.
-        const existingTask = this.taskRepository.findById(project_id, task_id);
+        this.ensureProjectExists(input.project_id);
+        const existingTask = this.taskRepository.findById(input.project_id, input.task_id);
         if (!existingTask) {
-            logger.warn(`[TaskService] Task ${task_id} not found in project ${project_id}`);
-            throw new NotFoundError(`Task with ID ${task_id} not found in project ${project_id}.`);
+            throw new NotFoundError(`Task with ID ${input.task_id} not found in project ${input.project_id}.`);
         }
 
-        // 4. Validate Dependency Existence if provided
-        if (input.dependencies !== undefined) {
-            if (input.dependencies.length > 0) {
-                const depCheck = this.taskRepository.checkTasksExist(project_id, input.dependencies);
-                if (!depCheck.allExist) {
-                    logger.warn(`[TaskService] Invalid dependencies provided for task ${task_id}:`, depCheck.missingIds);
-                    throw new ValidationError(`One or more dependency tasks not found in project ${project_id}: ${depCheck.missingIds.join(', ')}`);
-                }
-                // Also check for self-dependency
-                if (input.dependencies.includes(task_id)) {
-                     throw new ValidationError(`Task ${task_id} cannot depend on itself.`);
-                }
-            }
-             // If input.dependencies is an empty array, it means "remove all dependencies"
-        }
+        this.validateWorkItemPlacement(
+            input.project_id,
+            existingTask.item_type,
+            input.parent_task_id !== undefined ? input.parent_task_id : existingTask.parent_task_id ?? null,
+            input.sprint_id !== undefined ? input.sprint_id : existingTask.sprint_id ?? null,
+            input.task_id
+        );
+        this.validateDependencies(input.project_id, input.task_id, input.dependencies);
 
-        // 5. Prepare payload for repository
-        const updatePayload: { description?: string; priority?: TaskData['priority']; dependencies?: string[] } = {};
-        if (input.description !== undefined) updatePayload.description = input.description;
-        if (input.priority !== undefined) updatePayload.priority = input.priority;
-        if (input.dependencies !== undefined) updatePayload.dependencies = input.dependencies;
+        const updatedTaskData = this.taskRepository.updateTask(input.project_id, input.task_id, {
+            description: input.description,
+            priority: input.priority,
+            parent_task_id: input.parent_task_id,
+            sprint_id: input.sprint_id,
+            dependencies: input.dependencies,
+        }, new Date().toISOString());
 
-        // 6. Call Repository update method
-        try {
-            const now = new Date().toISOString();
-            // The repo method handles the transaction for task update + dependency replacement
-            const updatedTaskData = this.taskRepository.updateTask(project_id, task_id, updatePayload, now);
-
-            // 7. Fetch full details (including potentially updated dependencies and existing subtasks)
-            // Re-use logic similar to getTaskById
-            const finalDependencies = this.taskRepository.findDependencies(task_id);
-            const finalSubtasks = this.taskRepository.findSubtasks(task_id);
-
-            const fullUpdatedTask: FullTaskData = {
-                ...updatedTaskData, // Use the data returned by the update method
-                dependencies: finalDependencies,
-                subtasks: finalSubtasks,
-            };
-
-            logger.info(`[TaskService] Successfully updated task ${task_id} in project ${project_id}`);
-            return fullUpdatedTask;
-
-        } catch (error) {
-            logger.error(`[TaskService] Error updating task ${task_id} in project ${project_id}:`, error);
-            // Re-throw specific errors if needed, otherwise let the generic error propagate
-             if (error instanceof Error && error.message.includes('not found')) {
-                 // Map repo's generic error for not found back to specific NotFoundError
-                 throw new NotFoundError(error.message);
-             }
-            throw error; // Re-throw other errors (like DB constraint errors or unexpected ones)
-        }
+        return {
+            ...updatedTaskData,
+            dependencies: this.taskRepository.findDependencies(input.task_id),
+            subtasks: this.taskRepository.findSubtasks(input.task_id),
+        };
     }
 
-
-    /**
-     * Deletes one or more tasks within a project.
-     * @param projectId - The project ID.
-     * @param taskIds - An array of task IDs to delete.
-     * @returns The number of tasks successfully deleted.
-     * @throws {NotFoundError} If the project or any of the specified tasks are not found.
-     * @throws {Error} If the database operation fails.
-     */
     public async deleteTasks(projectId: string, taskIds: string[]): Promise<number> {
-        logger.info(`[TaskService] Attempting to delete ${taskIds.length} tasks from project ${projectId}`);
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, taskIds);
+        return this.taskRepository.deleteTasks(projectId, taskIds);
+    }
 
-        // 1. Validate Project Existence
-        const projectExists = this.projectRepository.findById(projectId);
-        if (!projectExists) {
-            logger.warn(`[TaskService] Project not found: ${projectId}`);
+    public async closeSprint(projectId: string, sprintId: string, closeTasks = true): Promise<{ sprint_id: string; closed_task_count: number }> {
+        this.ensureProjectExists(projectId);
+        if (!this.sprintRepository.findById(projectId, sprintId)) {
+            throw new NotFoundError(`Sprint with ID ${sprintId} not found in project ${projectId}.`);
+        }
+
+        const now = new Date().toISOString();
+        let closedTaskCount = 0;
+        const transaction = this.db.transaction(() => {
+            if (closeTasks) {
+                closedTaskCount = this.taskRepository.updateSprintStatus(projectId, sprintId, 'done', now);
+            }
+            this.sprintRepository.updateStatus(projectId, sprintId, 'closed', now);
+        });
+        transaction();
+
+        return { sprint_id: sprintId, closed_task_count: closedTaskCount };
+    }
+
+    public async assignToSprint(projectId: string, taskIds: string[], sprintId: string | null): Promise<{ assigned_count: number; sprint_id: string | null }> {
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, taskIds);
+        if (sprintId && !this.sprintRepository.findById(projectId, sprintId)) {
+            throw new NotFoundError(`Sprint with ID ${sprintId} not found in project ${projectId}.`);
+        }
+
+        for (const taskId of taskIds) {
+            const task = this.taskRepository.findById(projectId, taskId);
+            if (task?.item_type === 'epic' && sprintId) {
+                throw new ValidationError('Epics cannot be assigned directly to a sprint.');
+            }
+        }
+
+        const assignedCount = this.taskRepository.updateSprintAssignment(projectId, taskIds, sprintId, new Date().toISOString());
+        return { assigned_count: assignedCount, sprint_id: sprintId };
+    }
+
+    public async getSprintProgress(projectId: string, sprintId: string): Promise<SprintProgress> {
+        this.ensureProjectExists(projectId);
+        if (!this.sprintRepository.findById(projectId, sprintId)) {
+            throw new NotFoundError(`Sprint with ID ${sprintId} not found in project ${projectId}.`);
+        }
+
+        const sprintItems = this.taskRepository.findBySprintId(projectId, sprintId);
+        const byStatus: Record<TaskStatus, number> = { todo: 0, 'in-progress': 0, review: 0, done: 0 };
+        for (const item of sprintItems) {
+            byStatus[item.status] += 1;
+        }
+
+        const sprintTasks = sprintItems.filter(item => item.item_type === 'task');
+        const doneTasks = sprintTasks.filter(task => task.status === 'done').length;
+
+        return {
+            sprint_id: sprintId,
+            project_id: projectId,
+            total_items: sprintItems.length,
+            total_tasks: sprintTasks.length,
+            done_tasks: doneTasks,
+            open_tasks: sprintTasks.length - doneTasks,
+            progress_percent: sprintTasks.length === 0 ? 0 : Math.round((doneTasks / sprintTasks.length) * 100),
+            by_status: byStatus,
+        };
+    }
+
+    public async getEpicProgress(projectId: string, epicId: string): Promise<EpicProgress> {
+        this.ensureProjectExists(projectId);
+        const epic = this.taskRepository.findById(projectId, epicId);
+        if (!epic || epic.item_type !== 'epic') {
+            throw new NotFoundError(`Epic with ID ${epicId} not found in project ${projectId}.`);
+        }
+
+        const items = this.taskRepository.findDescendants(projectId, epicId);
+        const byStatus: Record<TaskStatus, number> = { todo: 0, 'in-progress': 0, review: 0, done: 0 };
+        for (const item of items) {
+            byStatus[item.status] += 1;
+        }
+
+        const stories = items.filter(item => item.item_type === 'story');
+        const tasks = items.filter(item => item.item_type === 'task');
+        const doneTasks = tasks.filter(task => task.status === 'done').length;
+
+        return {
+            epic_id: epicId,
+            project_id: projectId,
+            total_items: items.length,
+            total_stories: stories.length,
+            total_tasks: tasks.length,
+            done_tasks: doneTasks,
+            open_tasks: tasks.length - doneTasks,
+            progress_percent: tasks.length === 0 ? 0 : Math.round((doneTasks / tasks.length) * 100),
+            by_status: byStatus,
+        };
+    }
+
+    public async getSprintBacklog(projectId: string, sprintId: string): Promise<StructuredTaskData[]> {
+        this.ensureProjectExists(projectId);
+        if (!this.sprintRepository.findById(projectId, sprintId)) {
+            throw new NotFoundError(`Sprint with ID ${sprintId} not found in project ${projectId}.`);
+        }
+
+        const sprintItems = this.taskRepository.findBySprintId(projectId, sprintId);
+        const allTasks = this.taskRepository.findAllTasksForProject(projectId);
+        const requiredIds = new Set(sprintItems.map(item => item.task_id));
+
+        for (const item of sprintItems) {
+            let currentParentId = item.parent_task_id ?? null;
+            while (currentParentId) {
+                const parent = allTasks.find(candidate => candidate.task_id === currentParentId);
+                if (!parent) {
+                    break;
+                }
+                requiredIds.add(parent.task_id);
+                currentParentId = parent.parent_task_id ?? null;
+            }
+        }
+
+        return this.structureTasks(allTasks.filter(item => requiredIds.has(item.task_id)), true);
+    }
+
+    private structureTasks(tasks: TaskData[], includeOrphansAsRoots: boolean): StructuredTaskData[] {
+        const taskMap: Map<string, StructuredTaskData> = new Map();
+        const rootTasks: StructuredTaskData[] = [];
+        for (const task of tasks) {
+            taskMap.set(task.task_id, { ...task, subtasks: [] });
+        }
+        for (const task of tasks) {
+            const structuredTask = taskMap.get(task.task_id)!;
+            if (task.parent_task_id && taskMap.has(task.parent_task_id)) {
+                taskMap.get(task.parent_task_id)!.subtasks!.push(structuredTask);
+            } else if (!task.parent_task_id || includeOrphansAsRoots) {
+                rootTasks.push(structuredTask);
+            }
+        }
+        return rootTasks;
+    }
+
+    private ensureProjectExists(projectId: string): void {
+        if (!this.projectRepository.findById(projectId)) {
             throw new NotFoundError(`Project with ID ${projectId} not found.`);
         }
+    }
 
-        // 2. Validate Task Existence *before* attempting delete
-        // This ensures we report an accurate count and catch non-existent IDs early.
+    private ensureTasksExist(projectId: string, taskIds: string[]): void {
         const existenceCheck = this.taskRepository.checkTasksExist(projectId, taskIds);
         if (!existenceCheck.allExist) {
-            logger.warn(`[TaskService] Cannot delete: One or more tasks not found in project ${projectId}:`, existenceCheck.missingIds);
-            // Throw NotFoundError here, as InvalidParams might be confusing if some IDs were valid
-            throw new NotFoundError(`One or more tasks to delete not found in project ${projectId}: ${existenceCheck.missingIds.join(', ')}`);
-        }
-
-        // 3. Call Repository delete method
-        try {
-            // The repository method handles the actual DELETE operation
-            const deletedCount = this.taskRepository.deleteTasks(projectId, taskIds);
-
-            // Double-check count (optional, but good sanity check)
-            if (deletedCount !== taskIds.length) {
-                logger.warn(`[TaskService] Expected to delete ${taskIds.length} tasks, but repository reported ${deletedCount} deletions.`);
-                // This might indicate a race condition or unexpected DB behavior, though unlikely with cascade.
-                // For V1, we'll trust the repo count but log the warning.
-            }
-
-            logger.info(`[TaskService] Successfully deleted ${deletedCount} tasks from project ${projectId}`);
-            return deletedCount;
-
-        } catch (error) {
-            logger.error(`[TaskService] Error deleting tasks from project ${projectId}:`, error);
-            throw error; // Re-throw database or other errors
+            throw new NotFoundError(`One or more tasks not found in project ${projectId}: ${existenceCheck.missingIds.join(', ')}`);
         }
     }
 
+    private validateDependencies(projectId: string, taskId: string, dependencies?: string[]): void {
+        if (dependencies === undefined || dependencies.length === 0) {
+            return;
+        }
 
-    // --- Add other task service methods later ---
+        const depCheck = this.taskRepository.checkTasksExist(projectId, dependencies);
+        if (!depCheck.allExist) {
+            throw new ValidationError(`One or more dependency tasks not found in project ${projectId}: ${depCheck.missingIds.join(', ')}`);
+        }
+
+        if (dependencies.includes(taskId)) {
+            throw new ValidationError(`Task ${taskId} cannot depend on itself.`);
+        }
+    }
+
+    private validateWorkItemPlacement(
+        projectId: string,
+        itemType: WorkItemType,
+        parentTaskId: string | null,
+        sprintId: string | null,
+        taskId?: string
+    ): void {
+        if (itemType === 'epic' && parentTaskId) {
+            throw new ValidationError('Epics cannot have a parent task.');
+        }
+
+        if (itemType === 'epic' && sprintId) {
+            throw new ValidationError('Epics cannot be assigned directly to a sprint.');
+        }
+
+        if ((itemType === 'story' || itemType === 'task') && parentTaskId) {
+            if (taskId && parentTaskId === taskId) {
+                throw new ValidationError(`Task ${taskId} cannot be its own parent.`);
+            }
+
+            const parentTask = this.taskRepository.findById(projectId, parentTaskId);
+            if (!parentTask) {
+                throw new ValidationError(`Parent task ${parentTaskId} was not found in project ${projectId}.`);
+            }
+
+            if (itemType === 'story' && parentTask.item_type !== 'epic') {
+                throw new ValidationError('Stories can only be parented by epics.');
+            }
+
+            if (itemType === 'task' && parentTask.item_type === 'task') {
+                throw new ValidationError('Tasks can only be parented by stories or epics.');
+            }
+        }
+
+        if (sprintId && !this.sprintRepository.findById(projectId, sprintId)) {
+            throw new ValidationError(`Sprint ${sprintId} was not found in project ${projectId}.`);
+        }
+    }
 }

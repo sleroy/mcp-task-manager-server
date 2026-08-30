@@ -12,6 +12,7 @@ Returns the full details of the newly created task upon success.
 // Allowed enum values for status and priority
 const TaskStatusEnum = z.enum(['todo', 'in-progress', 'review', 'done']);
 const TaskPriorityEnum = z.enum(['high', 'medium', 'low']);
+const WorkItemTypeEnum = z.enum(['epic', 'story', 'task']);
 
 // Zod schema for the parameters, matching FR-002 and addTaskTool.md spec
 export const TOOL_PARAMS = z.object({
@@ -23,6 +24,23 @@ export const TOOL_PARAMS = z.object({
         .min(1, "Task description cannot be empty.")
         .max(1024, "Task description cannot exceed 1024 characters.")
         .describe("The textual description of the task to be performed (1-1024 characters)."), // Required, length limits
+
+    item_type: WorkItemTypeEnum
+        .optional()
+        .default('task')
+        .describe("Optional work item type. Use 'epic' for major initiatives, 'story' for user stories, and 'task' for executable work. Defaults to 'task'."),
+
+    parent_task_id: z.string()
+        .uuid("The parent_task_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional parent work item ID. Stories can be parented by epics; tasks can be parented by stories or epics."),
+
+    sprint_id: z.string()
+        .uuid("The sprint_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional sprint assignment. Epics cannot be assigned directly to a sprint."),
 
     dependencies: z.array(z.string().describe("A task ID that this new task depends on.")) // Allow any string for now, existence checked in service (or deferred)
         .max(50, "A task cannot have more than 50 dependencies.")

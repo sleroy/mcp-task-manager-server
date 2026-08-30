@@ -70,6 +70,7 @@ export class DatabaseManager {
                 logger.info('[DatabaseManager] Database schema initialized successfully.');
             } else {
                 logger.info('[DatabaseManager] Database schema already initialized.');
+                this.applyMigrations();
             }
         } catch (error) {
             logger.error('[DatabaseManager] Failed to initialize database:', error);
@@ -85,6 +86,47 @@ export class DatabaseManager {
             throw new Error('Database connection not available.');
         }
         return this.db;
+    }
+
+    private applyMigrations(): void {
+        const migration = this.db.transaction(() => {
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS sprints (
+                    sprint_id TEXT PRIMARY KEY NOT NULL,
+                    project_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    goal TEXT NULL,
+                    start_date TEXT NULL,
+                    end_date TEXT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+                );
+            `);
+
+            const taskColumns = this.db.pragma('table_info(tasks)') as { name: string }[];
+            const columnNames = new Set(taskColumns.map(column => column.name));
+
+            if (!columnNames.has('sprint_id')) {
+                this.db.exec('ALTER TABLE tasks ADD COLUMN sprint_id TEXT NULL REFERENCES sprints(sprint_id) ON DELETE SET NULL;');
+                logger.info('[DatabaseManager] Added tasks.sprint_id column.');
+            }
+            if (!columnNames.has('item_type')) {
+                this.db.exec("ALTER TABLE tasks ADD COLUMN item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task'));");
+                logger.info('[DatabaseManager] Added tasks.item_type column.');
+            }
+
+            this.db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_tasks_sprint_id ON tasks(sprint_id);
+                CREATE INDEX IF NOT EXISTS idx_tasks_item_type ON tasks(item_type);
+                CREATE INDEX IF NOT EXISTS idx_sprints_project_id ON sprints(project_id);
+                CREATE INDEX IF NOT EXISTS idx_sprints_status ON sprints(status);
+            `);
+        });
+
+        migration();
+        logger.info('[DatabaseManager] Database migrations applied successfully.');
     }
 
     // Optional: Add a close method for graceful shutdown

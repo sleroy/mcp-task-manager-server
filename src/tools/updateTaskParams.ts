@@ -5,7 +5,7 @@ export const TOOL_NAME = "updateTask";
 
 export const TOOL_DESCRIPTION = `
 Updates specific details of an existing task within a project.
-Requires the project ID and task ID. Allows updating description, priority, and/or dependencies.
+Requires the project ID and task ID. Allows updating description, priority, parent, sprint assignment, and/or dependencies.
 At least one optional field (description, priority, dependencies) must be provided.
 Returns the full details of the updated task upon success.
 `;
@@ -33,6 +33,18 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
         .optional()
         .describe("Optional. The new priority level for the task ('high', 'medium', or 'low')."), // Optional, enum
 
+    parent_task_id: z.string()
+        .uuid("The parent_task_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional. The new parent work item ID, or null to remove the parent."),
+
+    sprint_id: z.string()
+        .uuid("The sprint_id must be a valid UUID.")
+        .nullable()
+        .optional()
+        .describe("Optional. The new sprint assignment, or null to remove the sprint assignment."),
+
     dependencies: z.array(
             z.string()
                 .uuid("Each dependency task ID must be a valid UUID.")
@@ -45,8 +57,8 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
 
 // Refined schema for validation and type inference
 export const TOOL_PARAMS = UPDATE_TASK_BASE_SCHEMA.refine(
-    data => data.description !== undefined || data.priority !== undefined || data.dependencies !== undefined, {
-        message: "At least one field to update (description, priority, or dependencies) must be provided.",
+    data => data.description !== undefined || data.priority !== undefined || data.parent_task_id !== undefined || data.sprint_id !== undefined || data.dependencies !== undefined, {
+        message: "At least one field to update (description, priority, parent_task_id, sprint_id, or dependencies) must be provided.",
         // path: [], // No specific path, applies to the object
     }
 );

@@ -4,7 +4,8 @@ import { logger } from "../utils/index.js"; // Now using barrel file
 import { DatabaseManager } from "../db/DatabaseManager.js";
 import { ProjectRepository } from "../repositories/ProjectRepository.js";
 import { TaskRepository } from "../repositories/TaskRepository.js"; // Added TaskRepository import
-import { ProjectService, TaskService } from "../services/index.js"; // Using barrel file, added TaskService
+import { SprintRepository } from "../repositories/SprintRepository.js";
+import { ProjectService, SprintService, TaskService } from "../services/index.js"; // Using barrel file, added TaskService
 
 // Import tool registration functions
 // import { exampleTool } from "./exampleTool.js"; // Commenting out example
@@ -20,6 +21,20 @@ import { importProjectTool } from "./importProjectTool.js";
 import { updateTaskTool } from "./updateTaskTool.js"; // Import the new tool
 import { deleteTaskTool } from "./deleteTaskTool.js"; // Import deleteTask tool
 import { deleteProjectTool } from "./deleteProjectTool.js"; // Import deleteProject tool
+import { closeTaskTool } from "./closeTaskTool.js";
+import { closeSprintTool } from "./closeSprintTool.js";
+import { createEpicTool } from "./createEpicTool.js";
+import { createSprintTool } from "./createSprintTool.js";
+import { createStoryTool } from "./createStoryTool.js";
+import { assignToSprintTool } from "./assignToSprintTool.js";
+import { getEpicProgressTool } from "./getEpicProgressTool.js";
+import { getSprintBacklogTool } from "./getSprintBacklogTool.js";
+import { getSprintProgressTool } from "./getSprintProgressTool.js";
+import { listEpicsTool } from "./listEpicsTool.js";
+import { listStoriesTool } from "./listStoriesTool.js";
+import { listSprintsTool } from "./listSprintsTool.js";
+import { startSprintTool } from "./startSprintTool.js";
+import { updateSprintTool } from "./updateSprintTool.js";
 // import { yourTool } from "./yourTool.js"; // Add other new tool imports here
 
 /**
@@ -40,10 +55,12 @@ export function registerTools(server: McpServer): void {
         // Instantiate Repositories
         const projectRepository = new ProjectRepository(db);
         const taskRepository = new TaskRepository(db); // Instantiate TaskRepository
+        const sprintRepository = new SprintRepository(db);
 
         // Instantiate Services
-        const projectService = new ProjectService(db, projectRepository, taskRepository); // Pass db and both repos
-        const taskService = new TaskService(db, taskRepository, projectRepository); // Instantiate TaskService, passing db and repos
+        const projectService = new ProjectService(db, projectRepository, taskRepository, sprintRepository); // Pass db and repos
+        const sprintService = new SprintService(sprintRepository, projectRepository);
+        const taskService = new TaskService(db, taskRepository, projectRepository, sprintRepository); // Instantiate TaskService, passing db and repos
 
         // --- Register Tools ---
         // Register each tool, passing necessary services
@@ -51,10 +68,24 @@ export function registerTools(server: McpServer): void {
         // exampleTool(server, configManager.getExampleServiceConfig()); // Example commented out
 
         createProjectTool(server, projectService);
+        createSprintTool(server, sprintService);
+        listSprintsTool(server, sprintService);
+        updateSprintTool(server, sprintService);
+        startSprintTool(server, sprintService);
+        closeSprintTool(server, taskService);
+        getSprintProgressTool(server, taskService);
+        getSprintBacklogTool(server, taskService);
+        assignToSprintTool(server, taskService);
+        createEpicTool(server, taskService);
+        listEpicsTool(server, taskService);
+        createStoryTool(server, taskService);
+        listStoriesTool(server, taskService);
+        getEpicProgressTool(server, taskService);
         addTaskTool(server, taskService);
         listTasksTool(server, taskService);
         showTaskTool(server, taskService);
         setTaskStatusTool(server, taskService);
+        closeTaskTool(server, taskService);
         expandTaskTool(server, taskService);
         getNextTaskTool(server, taskService);
         exportProjectTool(server, projectService);
