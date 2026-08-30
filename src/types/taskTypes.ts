@@ -29,6 +29,7 @@ export interface Task {
     parent_task_id: string | null; // UUID format or null
     sprint_id: string | null; // UUID format or null
     item_type: WorkItemType;
+    milestone: string | null;
     description: string;
     status: TaskStatus;
     priority: TaskPriority;
@@ -48,6 +49,7 @@ export interface TaskUpdatePayload {
     dependencies?: string[]; // Represents the complete new list of dependencies
     parent_task_id?: string | null;
     sprint_id?: string | null;
+    milestone?: string | null;
 }
 
 /**
@@ -60,6 +62,7 @@ export interface TaskDbObject {
     parent_task_id: string | null;
     sprint_id: string | null;
     item_type: WorkItemType;
+    milestone: string | null;
     description: string;
     status: TaskStatus;
     priority: TaskPriority;
@@ -83,6 +86,7 @@ export interface Sprint {
     project_id: string;
     name: string;
     goal: string | null;
+    milestone: string | null;
     start_date: string | null;
     end_date: string | null;
     status: SprintStatus;

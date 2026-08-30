@@ -17,6 +17,7 @@ const BatchItemSchema = z.object({
     parent_task_id: z.string().uuid().nullable().optional(),
     parent_client_id: z.string().min(1).max(128).optional(),
     sprint_id: z.string().uuid().nullable().optional(),
+    milestone: z.string().min(1).max(128).nullable().optional(),
     dependencies: z.array(z.string().uuid()).max(50).optional(),
     dependency_client_ids: z.array(z.string().min(1).max(128)).max(50).optional(),
     priority: TaskPriorityEnum.optional().default('medium'),

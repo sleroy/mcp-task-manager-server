@@ -7,6 +7,7 @@ export interface SprintData {
     project_id: string;
     name: string;
     goal: string | null;
+    milestone: string | null;
     start_date: string | null;
     end_date: string | null;
     status: SprintStatus;
@@ -24,10 +25,10 @@ export class SprintRepository {
     public create(sprint: SprintData): void {
         const sql = `
             INSERT INTO sprints (
-                sprint_id, project_id, name, goal, start_date, end_date,
+                sprint_id, project_id, name, goal, milestone, start_date, end_date,
                 status, created_at, updated_at
             ) VALUES (
-                @sprint_id, @project_id, @name, @goal, @start_date, @end_date,
+                @sprint_id, @project_id, @name, @goal, @milestone, @start_date, @end_date,
                 @status, @created_at, @updated_at
             )
         `;
@@ -42,7 +43,7 @@ export class SprintRepository {
 
     public findById(projectId: string, sprintId: string): SprintData | undefined {
         const sql = `
-            SELECT sprint_id, project_id, name, goal, start_date, end_date, status, created_at, updated_at
+            SELECT sprint_id, project_id, name, goal, milestone, start_date, end_date, status, created_at, updated_at
             FROM sprints
             WHERE project_id = ? AND sprint_id = ?
         `;
@@ -54,9 +55,9 @@ export class SprintRepository {
         }
     }
 
-    public findByProjectId(projectId: string, status?: SprintStatus): SprintData[] {
+    public findByProjectId(projectId: string, status?: SprintStatus, milestone?: string | null): SprintData[] {
         let sql = `
-            SELECT sprint_id, project_id, name, goal, start_date, end_date, status, created_at, updated_at
+            SELECT sprint_id, project_id, name, goal, milestone, start_date, end_date, status, created_at, updated_at
             FROM sprints
             WHERE project_id = ?
         `;
@@ -64,6 +65,14 @@ export class SprintRepository {
         if (status) {
             sql += ' AND status = ?';
             params.push(status);
+        }
+        if (milestone !== undefined) {
+            if (milestone === null) {
+                sql += ' AND milestone IS NULL';
+            } else {
+                sql += ' AND milestone = ?';
+                params.push(milestone);
+            }
         }
         sql += ' ORDER BY start_date IS NULL ASC, start_date ASC, created_at ASC';
 
@@ -83,7 +92,7 @@ export class SprintRepository {
 
     public findMostRecentActive(projectId: string): SprintData | undefined {
         const sql = `
-            SELECT sprint_id, project_id, name, goal, start_date, end_date, status, created_at, updated_at
+            SELECT sprint_id, project_id, name, goal, milestone, start_date, end_date, status, created_at, updated_at
             FROM sprints
             WHERE project_id = ? AND status = 'active'
             ORDER BY start_date IS NULL ASC, start_date DESC, created_at DESC
@@ -125,6 +134,7 @@ export class SprintRepository {
         updates: {
             name?: string;
             goal?: string | null;
+            milestone?: string | null;
             start_date?: string | null;
             end_date?: string | null;
             status?: SprintStatus;
@@ -141,6 +151,10 @@ export class SprintRepository {
         if (updates.goal !== undefined) {
             setClauses.push('goal = ?');
             params.push(updates.goal);
+        }
+        if (updates.milestone !== undefined) {
+            setClauses.push('milestone = ?');
+            params.push(updates.milestone);
         }
         if (updates.start_date !== undefined) {
             setClauses.push('start_date = ?');

@@ -13,6 +13,8 @@ export const TOOL_PARAMS = z.object({
         .describe("The unique identifier (UUID) of the project whose sprints should be listed."),
     status: SprintStatusEnum.optional()
         .describe("Optional filter to return only sprints matching the specified status."),
+    milestone: z.string().min(1).max(128).nullable().optional()
+        .describe("Optional milestone filter. Pass null for sprints without a milestone."),
 });
 
 export type ListSprintsArgs = z.infer<typeof TOOL_PARAMS>;

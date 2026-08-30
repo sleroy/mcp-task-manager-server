@@ -17,6 +17,7 @@ import { setTaskStatusTool } from "./setTaskStatusTool.js";
 import { expandTaskTool } from "./expandTaskTool.js";
 import { getNextTaskTool } from "./getNextTaskTool.js";
 import { exportProjectTool } from "./exportProjectTool.js";
+import { exportProjectSnapshotTool } from "./exportProjectSnapshotTool.js";
 import { importProjectTool } from "./importProjectTool.js";
 import { updateTaskTool } from "./updateTaskTool.js"; // Import the new tool
 import { deleteTaskTool } from "./deleteTaskTool.js"; // Import deleteTask tool
@@ -97,6 +98,7 @@ export function registerTools(server: McpServer): void {
         expandTaskTool(server, taskService);
         getNextTaskTool(server, taskService);
         exportProjectTool(server, projectService);
+        exportProjectSnapshotTool(server, projectService);
         importProjectTool(server, projectService); // Register importProjectTool (uses ProjectService)
         updateTaskTool(server, taskService); // Register the new updateTask tool
         deleteTaskTool(server, taskService); // Register deleteTask tool

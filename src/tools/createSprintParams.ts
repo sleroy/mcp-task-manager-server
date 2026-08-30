@@ -16,6 +16,10 @@ export const TOOL_PARAMS = z.object({
         .describe("Human-readable sprint name."),
     goal: z.string().max(1024, "Sprint goal cannot exceed 1024 characters.").nullable().optional()
         .describe("Optional sprint goal."),
+    description: z.string().max(1024, "Sprint description cannot exceed 1024 characters.").nullable().optional()
+        .describe("Optional alias for sprint goal, accepted for clients that use description."),
+    milestone: z.string().min(1).max(128).nullable().optional()
+        .describe("Optional lightweight milestone label such as M0.1. This is not required to use sprints."),
     start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "start_date must use YYYY-MM-DD.").nullable().optional()
         .describe("Optional sprint start date in YYYY-MM-DD format."),
     end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "end_date must use YYYY-MM-DD.").nullable().optional()

@@ -12,6 +12,7 @@ export interface AddTaskInput {
     item_type?: WorkItemType;
     parent_task_id?: string | null;
     sprint_id?: string | null;
+    milestone?: string | null;
     dependencies?: string[];
     priority?: TaskPriority;
     status?: TaskStatus;
@@ -23,6 +24,7 @@ export interface ListTasksOptions {
     item_type?: WorkItemType;
     sprint_id?: string | null;
     parent_task_id?: string | null;
+    milestone?: string | null;
     include_subtasks?: boolean;
 }
 
@@ -84,6 +86,7 @@ export interface BatchUpdateWorkItemInput {
     priority?: TaskPriority;
     parent_task_id?: string | null;
     sprint_id?: string | null;
+    milestone?: string | null;
     dependencies?: string[];
 }
 
@@ -105,8 +108,21 @@ export interface BacklogImportNode {
     priority?: TaskPriority;
     status?: TaskStatus;
     sprint_id?: string | null;
+    milestone?: string | null;
     stories?: BacklogImportNode[];
     tasks?: BacklogImportNode[];
+}
+
+export interface AssignToSprintInput {
+    project_id: string;
+    sprint_id: string | null;
+    task_ids?: string[];
+    item_type?: WorkItemType;
+    status?: TaskStatus;
+    parent_task_id?: string | null;
+    epic_id?: string;
+    milestone?: string | null;
+    include_subtasks?: boolean;
 }
 
 export class TaskService {
@@ -123,6 +139,7 @@ export class TaskService {
         const itemType = input.item_type ?? 'task';
         const parentTaskId = input.parent_task_id ?? null;
         const sprintId = input.sprint_id ?? null;
+        const milestone = input.milestone ?? null;
         this.validateWorkItemPlacement(input.project_id, itemType, parentTaskId, sprintId);
 
         const taskId = uuidv4();
@@ -134,6 +151,7 @@ export class TaskService {
             project_id: input.project_id,
             parent_task_id: parentTaskId,
             sprint_id: sprintId,
+            milestone,
             item_type: itemType,
             description: input.description,
             status: input.status ?? 'todo',
@@ -212,6 +230,7 @@ export class TaskService {
                         priority: update.priority,
                         parent_task_id: update.parent_task_id,
                         sprint_id: update.sprint_id,
+                        milestone: update.milestone,
                         dependencies: update.dependencies,
                     }, new Date().toISOString());
                 }
@@ -275,15 +294,18 @@ export class TaskService {
                 description: epic.description,
                 priority: epic.priority,
                 status: epic.status,
+                milestone: epic.milestone ?? null,
             });
 
             for (const story of epic.stories ?? []) {
                 const storyClientId = story.client_id ?? nextClientId();
+                const storyMilestone = story.milestone ?? epic.milestone ?? null;
                 items.push({
                     project_id: projectId,
                     client_id: storyClientId,
                     parent_client_id: epicClientId,
                     sprint_id: story.sprint_id ?? sprintId ?? null,
+                    milestone: storyMilestone,
                     item_type: 'story',
                     description: story.description,
                     priority: story.priority,
@@ -296,6 +318,7 @@ export class TaskService {
                         client_id: task.client_id ?? nextClientId(),
                         parent_client_id: storyClientId,
                         sprint_id: task.sprint_id ?? story.sprint_id ?? sprintId ?? null,
+                        milestone: task.milestone ?? storyMilestone,
                         item_type: 'task',
                         description: task.description,
                         priority: task.priority,
@@ -310,6 +333,7 @@ export class TaskService {
                     client_id: task.client_id ?? nextClientId(),
                     parent_client_id: epicClientId,
                     sprint_id: task.sprint_id ?? sprintId ?? null,
+                    milestone: task.milestone ?? epic.milestone ?? null,
                     item_type: 'task',
                     description: task.description,
                     priority: task.priority,
@@ -329,6 +353,7 @@ export class TaskService {
             item_type: options.item_type,
             sprint_id: options.sprint_id,
             parent_task_id: options.parent_task_id,
+            milestone: options.milestone,
         });
 
         if (!options.include_subtasks) {
@@ -340,12 +365,12 @@ export class TaskService {
         return this.structureTasks(allTasks, options.parent_task_id !== undefined);
     }
 
-    public async listEpics(projectId: string, status?: TaskStatus, includeSubtasks = true): Promise<TaskData[] | StructuredTaskData[]> {
+    public async listEpics(projectId: string, status?: TaskStatus, includeSubtasks = true, milestone?: string | null): Promise<TaskData[] | StructuredTaskData[]> {
         this.ensureProjectExists(projectId);
         const allTasks = this.taskRepository.findAllTasksForProject(projectId);
         const epicIds = new Set(
             allTasks
-                .filter(task => task.item_type === 'epic' && (status === undefined || task.status === status))
+                .filter(task => task.item_type === 'epic' && (status === undefined || task.status === status) && (milestone === undefined || task.milestone === milestone))
                 .map(task => task.task_id)
         );
 
@@ -367,6 +392,7 @@ export class TaskService {
         project_id: string;
         epic_id?: string;
         sprint_id?: string;
+        milestone?: string | null;
         status?: TaskStatus;
         include_subtasks?: boolean;
     }): Promise<TaskData[] | StructuredTaskData[]> {
@@ -376,7 +402,8 @@ export class TaskService {
             task.item_type === 'story' &&
             (options.status === undefined || task.status === options.status) &&
             (options.epic_id === undefined || task.parent_task_id === options.epic_id) &&
-            (options.sprint_id === undefined || task.sprint_id === options.sprint_id)
+            (options.sprint_id === undefined || task.sprint_id === options.sprint_id) &&
+            (options.milestone === undefined || task.milestone === options.milestone)
         );
 
         if (!options.include_subtasks) {
@@ -447,6 +474,7 @@ export class TaskService {
                     project_id: input.project_id,
                     parent_task_id: input.task_id,
                     sprint_id: parentTask.sprint_id ?? null,
+                    milestone: parentTask.milestone ?? null,
                     item_type: 'task',
                     description,
                     status: 'todo',
@@ -493,6 +521,7 @@ export class TaskService {
         priority?: TaskPriority;
         parent_task_id?: string | null;
         sprint_id?: string | null;
+        milestone?: string | null;
         dependencies?: string[];
     }): Promise<FullTaskData> {
         if (
@@ -500,9 +529,10 @@ export class TaskService {
             input.priority === undefined &&
             input.parent_task_id === undefined &&
             input.sprint_id === undefined &&
+            input.milestone === undefined &&
             input.dependencies === undefined
         ) {
-            throw new ValidationError('At least one field (description, priority, parent_task_id, sprint_id, or dependencies) must be provided for update.');
+            throw new ValidationError('At least one field (description, priority, parent_task_id, sprint_id, milestone, or dependencies) must be provided for update.');
         }
 
         this.ensureProjectExists(input.project_id);
@@ -525,6 +555,7 @@ export class TaskService {
             priority: input.priority,
             parent_task_id: input.parent_task_id,
             sprint_id: input.sprint_id,
+            milestone: input.milestone,
             dependencies: input.dependencies,
         }, new Date().toISOString());
 
@@ -560,22 +591,25 @@ export class TaskService {
         return { sprint_id: sprintId, closed_task_count: closedTaskCount };
     }
 
-    public async assignToSprint(projectId: string, taskIds: string[], sprintId: string | null): Promise<{ assigned_count: number; sprint_id: string | null }> {
-        this.ensureProjectExists(projectId);
-        this.ensureTasksExist(projectId, taskIds);
-        if (sprintId && !this.sprintRepository.findById(projectId, sprintId)) {
-            throw new NotFoundError(`Sprint with ID ${sprintId} not found in project ${projectId}.`);
+    public async assignToSprint(input: AssignToSprintInput): Promise<{ assigned_count: number; sprint_id: string | null; task_ids: string[] }> {
+        this.ensureProjectExists(input.project_id);
+        const sprint = input.sprint_id ? this.sprintRepository.findById(input.project_id, input.sprint_id) : undefined;
+        if (input.sprint_id && !sprint) {
+            throw new NotFoundError(`Sprint with ID ${input.sprint_id} not found in project ${input.project_id}.`);
         }
 
+        const taskIds = this.resolveSprintAssignmentTaskIds(input, sprint?.milestone ?? null);
+        this.ensureTasksExist(input.project_id, taskIds);
+
         for (const taskId of taskIds) {
-            const task = this.taskRepository.findById(projectId, taskId);
-            if (task?.item_type === 'epic' && sprintId) {
-                throw new ValidationError('Epics cannot be assigned directly to a sprint.');
+            const task = this.taskRepository.findById(input.project_id, taskId);
+            if (task?.item_type === 'epic' && input.sprint_id) {
+                throw new ValidationError('Epics cannot be assigned directly to a sprint. Assign descendant stories/tasks instead.');
             }
         }
 
-        const assignedCount = this.taskRepository.updateSprintAssignment(projectId, taskIds, sprintId, new Date().toISOString());
-        return { assigned_count: assignedCount, sprint_id: sprintId };
+        const assignedCount = this.taskRepository.updateSprintAssignment(input.project_id, taskIds, input.sprint_id, new Date().toISOString());
+        return { assigned_count: assignedCount, sprint_id: input.sprint_id, task_ids: taskIds };
     }
 
     public async getSprintProgress(projectId: string, sprintId: string): Promise<SprintProgress> {
@@ -737,6 +771,7 @@ export class TaskService {
                 project_id: projectId,
                 parent_task_id: parentTaskId,
                 sprint_id: sprintId,
+                milestone: resolved.item.milestone ?? null,
                 item_type: itemType,
                 description: resolved.item.description,
                 status: resolved.item.status ?? 'todo',
@@ -749,6 +784,70 @@ export class TaskService {
         }
 
         return { resolvedItems: output, idMap };
+    }
+
+    private resolveSprintAssignmentTaskIds(input: AssignToSprintInput, sprintMilestone: string | null): string[] {
+        if (input.task_ids && input.task_ids.length > 0) {
+            return this.withOptionalDescendants(input.project_id, input.task_ids, input.include_subtasks ?? false);
+        }
+
+        let candidates: TaskData[];
+        if (input.epic_id) {
+            const epic = this.taskRepository.findById(input.project_id, input.epic_id);
+            if (!epic || epic.item_type !== 'epic') {
+                throw new NotFoundError(`Epic with ID ${input.epic_id} not found in project ${input.project_id}.`);
+            }
+            candidates = this.taskRepository.findDescendants(input.project_id, input.epic_id);
+        } else {
+            const milestone = input.milestone !== undefined ? input.milestone : sprintMilestone;
+            const hasSelector =
+                input.item_type !== undefined ||
+                input.status !== undefined ||
+                input.parent_task_id !== undefined ||
+                input.milestone !== undefined ||
+                milestone !== null;
+
+            if (!hasSelector) {
+                throw new ValidationError('Provide task_ids or at least one selector such as milestone, epic_id, item_type, status, or parent_task_id.');
+            }
+
+            candidates = this.taskRepository.findByProjectId(input.project_id, {
+                item_type: input.item_type,
+                status: input.status,
+                parent_task_id: input.parent_task_id,
+                milestone: input.milestone !== undefined ? input.milestone : milestone,
+            });
+        }
+
+        const filtered = candidates.filter(task =>
+            task.item_type !== 'epic' &&
+            (input.item_type === undefined || task.item_type === input.item_type) &&
+            (input.status === undefined || task.status === input.status) &&
+            (input.parent_task_id === undefined || task.parent_task_id === input.parent_task_id) &&
+            (input.milestone === undefined || task.milestone === input.milestone)
+        );
+
+        const taskIds = filtered.map(task => task.task_id);
+        if (taskIds.length === 0) {
+            throw new ValidationError('No stories or tasks matched the sprint assignment selector.');
+        }
+        return this.withOptionalDescendants(input.project_id, taskIds, input.include_subtasks ?? false);
+    }
+
+    private withOptionalDescendants(projectId: string, taskIds: string[], includeSubtasks: boolean): string[] {
+        if (!includeSubtasks) {
+            return [...new Set(taskIds)];
+        }
+
+        const selected = new Set(taskIds);
+        for (const taskId of taskIds) {
+            for (const descendant of this.taskRepository.findDescendants(projectId, taskId)) {
+                if (descendant.item_type !== 'epic') {
+                    selected.add(descendant.task_id);
+                }
+            }
+        }
+        return [...selected];
     }
 
     private resolveBatchReference(

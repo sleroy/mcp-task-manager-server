@@ -23,6 +23,7 @@ export const listTasksTool = (server: McpServer, taskService: TaskService): void
                 item_type: args.item_type,
                 sprint_id: args.sprint_id,
                 parent_task_id: args.parent_task_id,
+                milestone: args.milestone,
                 include_subtasks: args.include_subtasks,
             });
 

@@ -9,11 +9,13 @@ const main = async () => {
         logger.info("Starting MCP server");
 
         // Choose your transport
+        process.stdin.resume();
         const transport = new StdioServerTransport();
         // const transport = new WebSocketServerTransport({ port: 8080 }); // Example
 
         logger.info("Connecting transport", { transport: transport.constructor.name });
         await server.connect(transport);
+        setInterval(() => undefined, 1000);
 
         logger.info("MCP Server connected and listening");
 

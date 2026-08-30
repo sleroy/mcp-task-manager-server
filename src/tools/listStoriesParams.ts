@@ -15,6 +15,8 @@ export const TOOL_PARAMS = z.object({
         .describe("Optional epic whose stories should be listed."),
     sprint_id: z.string().uuid("The sprint_id must be a valid UUID.").optional()
         .describe("Optional sprint whose stories should be listed."),
+    milestone: z.string().min(1).max(128).nullable().optional()
+        .describe("Optional milestone filter."),
     status: TaskStatusEnum.optional()
         .describe("Optional story status filter."),
     include_subtasks: z.boolean().optional().default(true)

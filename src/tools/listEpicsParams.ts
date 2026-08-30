@@ -13,6 +13,8 @@ export const TOOL_PARAMS = z.object({
         .describe("The unique identifier (UUID) of the project whose epics should be listed."),
     status: TaskStatusEnum.optional()
         .describe("Optional filter to return only epics with this status."),
+    milestone: z.string().min(1).max(128).nullable().optional()
+        .describe("Optional milestone filter."),
     include_subtasks: z.boolean().optional().default(true)
         .describe("Optional flag to include nested stories and tasks. Defaults to true."),
 });

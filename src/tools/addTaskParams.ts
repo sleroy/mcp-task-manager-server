@@ -42,6 +42,13 @@ export const TOOL_PARAMS = z.object({
         .optional()
         .describe("Optional sprint assignment. Epics cannot be assigned directly to a sprint."),
 
+    milestone: z.string()
+        .min(1, "Milestone cannot be empty.")
+        .max(128, "Milestone cannot exceed 128 characters.")
+        .nullable()
+        .optional()
+        .describe("Optional lightweight milestone label such as M0.1. This does not require using sprints or epics."),
+
     dependencies: z.array(z.string().describe("A task ID that this new task depends on.")) // Allow any string for now, existence checked in service (or deferred)
         .max(50, "A task cannot have more than 50 dependencies.")
         .optional()

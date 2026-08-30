@@ -25,6 +25,7 @@ export const addTaskTool = (server: McpServer, taskService: TaskService): void =
                 item_type: args.item_type,
                 parent_task_id: args.parent_task_id,
                 sprint_id: args.sprint_id,
+                milestone: args.milestone,
                 dependencies: args.dependencies, // Pass optional fields
                 priority: args.priority,
                 status: args.status,

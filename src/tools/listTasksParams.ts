@@ -39,6 +39,13 @@ export const TOOL_PARAMS = z.object({
         .optional()
         .describe("Optional filter to return work items under a specific parent. Pass null for root items."),
 
+    milestone: z.string()
+        .min(1)
+        .max(128)
+        .nullable()
+        .optional()
+        .describe("Optional milestone filter. Pass null for items without a milestone."),
+
     include_subtasks: z.boolean()
         .optional()
         .default(false) // Default value

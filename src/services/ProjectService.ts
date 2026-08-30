@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Database as Db } from 'better-sqlite3'; // Import Db type
+import fs from 'node:fs';
+import path from 'node:path';
 import { ProjectRepository, ProjectData } from '../repositories/ProjectRepository.js';
 import { TaskRepository, TaskData, DependencyData } from '../repositories/TaskRepository.js';
 import { SprintData, SprintRepository } from '../repositories/SprintRepository.js';
@@ -141,6 +143,23 @@ export class ProjectService {
         }
     }
 
+    public async exportProjectSnapshot(projectId: string, outputPath: string): Promise<{ project_id: string; output_path: string; bytes: number }> {
+        if (!path.isAbsolute(outputPath)) {
+            throw new ValidationError('output_path must be an absolute path.');
+        }
+
+        const jsonString = await this.exportProject(projectId);
+        const content = `${jsonString}\n`;
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, content, 'utf8');
+
+        return {
+            project_id: projectId,
+            output_path: outputPath,
+            bytes: Buffer.byteLength(content, 'utf8'),
+        };
+    }
+
     /**
      * Imports project data from a JSON string, creating a new project.
      */
@@ -187,6 +206,7 @@ export class ProjectService {
                     project_id: newProjectId,
                     name: sprint.name,
                     goal: sprint.goal ?? null,
+                    milestone: sprint.milestone ?? null,
                     start_date: sprint.start_date ?? null,
                     end_date: sprint.end_date ?? null,
                     status: sprint.status,
@@ -203,6 +223,7 @@ export class ProjectService {
                     project_id: newProjectId,
                     parent_task_id: parentDbId,
                     sprint_id: task.sprint_id ? sprintIdMap.get(task.sprint_id) ?? null : null,
+                    milestone: task.milestone ?? null,
                     item_type: task.item_type ?? 'task',
                     description: task.description,
                     status: task.status,

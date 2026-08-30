@@ -96,6 +96,7 @@ export class DatabaseManager {
                     project_id TEXT NOT NULL,
                     name TEXT NOT NULL,
                     goal TEXT NULL,
+                    milestone TEXT NULL,
                     start_date TEXT NULL,
                     end_date TEXT NULL,
                     status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed')),
@@ -116,12 +117,25 @@ export class DatabaseManager {
                 this.db.exec("ALTER TABLE tasks ADD COLUMN item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task'));");
                 logger.info('[DatabaseManager] Added tasks.item_type column.');
             }
+            if (!columnNames.has('milestone')) {
+                this.db.exec('ALTER TABLE tasks ADD COLUMN milestone TEXT NULL;');
+                logger.info('[DatabaseManager] Added tasks.milestone column.');
+            }
+
+            const sprintColumns = this.db.pragma('table_info(sprints)') as { name: string }[];
+            const sprintColumnNames = new Set(sprintColumns.map(column => column.name));
+            if (!sprintColumnNames.has('milestone')) {
+                this.db.exec('ALTER TABLE sprints ADD COLUMN milestone TEXT NULL;');
+                logger.info('[DatabaseManager] Added sprints.milestone column.');
+            }
 
             this.db.exec(`
                 CREATE INDEX IF NOT EXISTS idx_tasks_sprint_id ON tasks(sprint_id);
                 CREATE INDEX IF NOT EXISTS idx_tasks_item_type ON tasks(item_type);
+                CREATE INDEX IF NOT EXISTS idx_tasks_milestone ON tasks(milestone);
                 CREATE INDEX IF NOT EXISTS idx_sprints_project_id ON sprints(project_id);
                 CREATE INDEX IF NOT EXISTS idx_sprints_status ON sprints(status);
+                CREATE INDEX IF NOT EXISTS idx_sprints_milestone ON sprints(milestone);
             `);
         });
 

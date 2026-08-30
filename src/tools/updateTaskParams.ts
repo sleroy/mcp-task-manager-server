@@ -45,6 +45,13 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
         .optional()
         .describe("Optional. The new sprint assignment, or null to remove the sprint assignment."),
 
+    milestone: z.string()
+        .min(1)
+        .max(128)
+        .nullable()
+        .optional()
+        .describe("Optional. The new lightweight milestone label, or null to remove it."),
+
     dependencies: z.array(
             z.string()
                 .uuid("Each dependency task ID must be a valid UUID.")
@@ -57,8 +64,8 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
 
 // Refined schema for validation and type inference
 export const TOOL_PARAMS = UPDATE_TASK_BASE_SCHEMA.refine(
-    data => data.description !== undefined || data.priority !== undefined || data.parent_task_id !== undefined || data.sprint_id !== undefined || data.dependencies !== undefined, {
-        message: "At least one field to update (description, priority, parent_task_id, sprint_id, or dependencies) must be provided.",
+    data => data.description !== undefined || data.priority !== undefined || data.parent_task_id !== undefined || data.sprint_id !== undefined || data.milestone !== undefined || data.dependencies !== undefined, {
+        message: "At least one field to update (description, priority, parent_task_id, sprint_id, milestone, or dependencies) must be provided.",
         // path: [], // No specific path, applies to the object
     }
 );

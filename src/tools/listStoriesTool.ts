@@ -13,6 +13,7 @@ export const listStoriesTool = (server: McpServer, taskService: TaskService): vo
                 status: args.status,
                 epic_id: args.epic_id,
                 sprint_id: args.sprint_id,
+                milestone: args.milestone,
                 include_subtasks: args.include_subtasks,
             });
             return { content: [{ type: "text" as const, text: JSON.stringify(stories) }] };

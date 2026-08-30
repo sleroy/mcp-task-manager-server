@@ -18,6 +18,8 @@ export const TOOL_PARAMS = z.object({
         .describe("The story description."),
     sprint_id: z.string().uuid("The sprint_id must be a valid UUID.").nullable().optional()
         .describe("Optional sprint assignment."),
+    milestone: z.string().min(1).max(128).nullable().optional()
+        .describe("Optional lightweight milestone label."),
     priority: TaskPriorityEnum.optional().default('medium')
         .describe("Optional story priority. Defaults to 'medium'."),
     status: TaskStatusEnum.optional().default('todo')

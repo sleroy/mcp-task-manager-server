@@ -8,7 +8,7 @@ import { ListEpicsArgs, TOOL_DESCRIPTION, TOOL_NAME, TOOL_PARAMS } from "./listE
 export const listEpicsTool = (server: McpServer, taskService: TaskService): void => {
     const processRequest = async (args: ListEpicsArgs) => {
         try {
-            const epics = await taskService.listEpics(args.project_id, args.status, args.include_subtasks);
+            const epics = await taskService.listEpics(args.project_id, args.status, args.include_subtasks, args.milestone);
             return { content: [{ type: "text" as const, text: JSON.stringify(epics) }] };
         } catch (error: unknown) {
             logger.error(`[${TOOL_NAME}] Error processing request:`, error);

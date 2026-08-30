@@ -9,6 +9,7 @@ export interface TaskData {
     project_id: string; // UUID
     parent_task_id?: string | null; // UUID or null
     sprint_id?: string | null; // UUID or null
+    milestone?: string | null;
     item_type: WorkItemType;
     description: string;
     status: TaskStatus;
@@ -22,6 +23,7 @@ export interface TaskFilters {
     item_type?: WorkItemType;
     sprint_id?: string | null;
     parent_task_id?: string | null;
+    milestone?: string | null;
 }
 
 // Define the structure for dependency data
@@ -45,10 +47,10 @@ export class TaskRepository {
         try {
             this.insertTaskStmt = this.db.prepare(`
                 INSERT INTO tasks (
-                    task_id, project_id, parent_task_id, sprint_id, item_type, description,
+                    task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description,
                     status, priority, created_at, updated_at
                 ) VALUES (
-                    @task_id, @project_id, @parent_task_id, @sprint_id, @item_type, @description,
+                    @task_id, @project_id, @parent_task_id, @sprint_id, @milestone, @item_type, @description,
                     @status, @priority, @created_at, @updated_at
                 )
             `);
@@ -116,7 +118,7 @@ export class TaskRepository {
      */
     public findByProjectId(projectId: string, filters: TaskFilters = {}): TaskData[] {
         let sql = `
-            SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+            SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
             FROM tasks
             WHERE project_id = ?
         `;
@@ -146,6 +148,14 @@ export class TaskRepository {
                 params.push(filters.parent_task_id);
             }
         }
+        if (filters.milestone !== undefined) {
+            if (filters.milestone === null) {
+                sql += ` AND milestone IS NULL`;
+            } else {
+                sql += ` AND milestone = ?`;
+                params.push(filters.milestone);
+            }
+        }
 
         // For simplicity in V1, we only fetch top-level tasks or all tasks depending on include_subtasks strategy in service
         // If we only wanted top-level: sql += ` AND parent_task_id IS NULL`;
@@ -172,7 +182,7 @@ export class TaskRepository {
      */
     public findById(projectId: string, taskId: string): TaskData | undefined {
         const sql = `
-            SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+            SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
             FROM tasks
             WHERE project_id = ? AND task_id = ?
         `;
@@ -194,7 +204,7 @@ export class TaskRepository {
      */
     public findSubtasks(parentTaskId: string): TaskData[] {
         const sql = `
-            SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+            SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
             FROM tasks
             WHERE parent_task_id = ?
             ORDER BY created_at ASC
@@ -333,7 +343,7 @@ export class TaskRepository {
         // This query finds tasks in the project with status 'todo'
         // AND for which no dependency exists OR all existing dependencies have status 'done'.
         let sql = `
-            SELECT t.task_id, t.project_id, t.parent_task_id, t.sprint_id, t.item_type, t.description, t.status, t.priority, t.created_at, t.updated_at
+            SELECT t.task_id, t.project_id, t.parent_task_id, t.sprint_id, t.milestone, t.item_type, t.description, t.status, t.priority, t.created_at, t.updated_at
             FROM tasks t
             WHERE t.project_id = ? AND t.status = 'todo' AND t.item_type = 'task'
             AND NOT EXISTS (
@@ -382,16 +392,16 @@ export class TaskRepository {
     public findDescendants(projectId: string, taskId: string): TaskData[] {
         const sql = `
             WITH RECURSIVE descendants AS (
-                SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+                SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
                 FROM tasks
                 WHERE project_id = ? AND parent_task_id = ?
                 UNION ALL
-                SELECT child.task_id, child.project_id, child.parent_task_id, child.sprint_id, child.item_type, child.description, child.status, child.priority, child.created_at, child.updated_at
+                SELECT child.task_id, child.project_id, child.parent_task_id, child.sprint_id, child.milestone, child.item_type, child.description, child.status, child.priority, child.created_at, child.updated_at
                 FROM tasks child
                 JOIN descendants parent ON child.parent_task_id = parent.task_id
                 WHERE child.project_id = ?
             )
-            SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+            SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
             FROM descendants
             ORDER BY created_at ASC
         `;
@@ -449,7 +459,7 @@ export class TaskRepository {
      */
     public findAllTasksForProject(projectId: string): TaskData[] {
         const sql = `
-            SELECT task_id, project_id, parent_task_id, sprint_id, item_type, description, status, priority, created_at, updated_at
+            SELECT task_id, project_id, parent_task_id, sprint_id, milestone, item_type, description, status, priority, created_at, updated_at
             FROM tasks
             WHERE project_id = ?
             ORDER BY created_at ASC
@@ -510,6 +520,7 @@ export class TaskRepository {
             dependencies?: string[];
             parent_task_id?: string | null;
             sprint_id?: string | null;
+            milestone?: string | null;
         },
         timestamp: string
     ): TaskData {
@@ -533,6 +544,10 @@ export class TaskRepository {
             if (updatePayload.sprint_id !== undefined) {
                 setClauses.push('sprint_id = ?');
                 params.push(updatePayload.sprint_id);
+            }
+            if (updatePayload.milestone !== undefined) {
+                setClauses.push('milestone = ?');
+                params.push(updatePayload.milestone);
             }
 
             // Always update the timestamp

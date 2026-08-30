@@ -15,6 +15,7 @@ const TaskNodeSchema = z.object({
     priority: TaskPriorityEnum.optional(),
     status: TaskStatusEnum.optional(),
     sprint_id: z.string().uuid().nullable().optional(),
+    milestone: z.string().min(1).max(128).nullable().optional(),
 });
 
 const StoryNodeSchema = TaskNodeSchema.extend({

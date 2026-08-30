@@ -14,9 +14,10 @@ const BatchUpdateSchema = z.object({
     priority: TaskPriorityEnum.optional(),
     parent_task_id: z.string().uuid().nullable().optional(),
     sprint_id: z.string().uuid().nullable().optional(),
+    milestone: z.string().min(1).max(128).nullable().optional(),
     dependencies: z.array(z.string().uuid()).max(50).optional(),
 }).refine(
-    data => data.description !== undefined || data.priority !== undefined || data.parent_task_id !== undefined || data.sprint_id !== undefined || data.dependencies !== undefined,
+    data => data.description !== undefined || data.priority !== undefined || data.parent_task_id !== undefined || data.sprint_id !== undefined || data.milestone !== undefined || data.dependencies !== undefined,
     { message: "Each update must provide at least one field." }
 );
 

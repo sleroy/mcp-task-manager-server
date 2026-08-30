@@ -26,6 +26,7 @@ export const updateTaskTool = (server: McpServer, taskService: TaskService): voi
                 priority: args.priority,
                 parent_task_id: args.parent_task_id,
                 sprint_id: args.sprint_id,
+                milestone: args.milestone,
                 dependencies: args.dependencies,
             });
 

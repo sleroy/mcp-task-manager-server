@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sprints (
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
     goal TEXT NULL,
+    milestone TEXT NULL,
     start_date TEXT NULL, -- ISO8601 date (YYYY-MM-DD) or null
     end_date TEXT NULL, -- ISO8601 date (YYYY-MM-DD) or null
     status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed')),
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_task_id TEXT NULL, -- For subtasks
     sprint_id TEXT NULL,
     item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task')),
+    milestone TEXT NULL,
     description TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('todo', 'in-progress', 'review', 'done')),
     priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_sprint_id ON tasks(sprint_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_item_type ON tasks(item_type);
+CREATE INDEX IF NOT EXISTS idx_tasks_milestone ON tasks(milestone);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id ON tasks(parent_task_id);
@@ -72,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
 -- Indexes on sprints table
 CREATE INDEX IF NOT EXISTS idx_sprints_project_id ON sprints(project_id);
 CREATE INDEX IF NOT EXISTS idx_sprints_status ON sprints(status);
+CREATE INDEX IF NOT EXISTS idx_sprints_milestone ON sprints(milestone);
 
 -- Indexes on task_dependencies table
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);

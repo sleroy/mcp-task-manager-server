@@ -12,6 +12,7 @@ export const createStoryTool = (server: McpServer, taskService: TaskService): vo
                 project_id: args.project_id,
                 parent_task_id: args.epic_id,
                 sprint_id: args.sprint_id,
+                milestone: args.milestone,
                 description: args.description,
                 priority: args.priority,
                 status: args.status,

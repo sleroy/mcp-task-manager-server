@@ -8,6 +8,8 @@ export interface CreateSprintInput {
     project_id: string;
     name: string;
     goal?: string | null;
+    description?: string | null;
+    milestone?: string | null;
     start_date?: string | null;
     end_date?: string | null;
     status?: SprintStatus;
@@ -16,6 +18,7 @@ export interface CreateSprintInput {
 export interface ListSprintsOptions {
     project_id: string;
     status?: SprintStatus;
+    milestone?: string | null;
 }
 
 export class SprintService {
@@ -33,7 +36,8 @@ export class SprintService {
             sprint_id: uuidv4(),
             project_id: input.project_id,
             name: input.name,
-            goal: input.goal ?? null,
+            goal: input.goal ?? input.description ?? null,
+            milestone: input.milestone ?? null,
             start_date: input.start_date ?? null,
             end_date: input.end_date ?? null,
             status: input.status ?? 'planned',
@@ -47,7 +51,7 @@ export class SprintService {
 
     public async listSprints(options: ListSprintsOptions): Promise<SprintData[]> {
         this.ensureProjectExists(options.project_id);
-        return this.sprintRepository.findByProjectId(options.project_id, options.status);
+        return this.sprintRepository.findByProjectId(options.project_id, options.status, options.milestone);
     }
 
     public async updateSprint(input: {
@@ -55,6 +59,8 @@ export class SprintService {
         sprint_id: string;
         name?: string;
         goal?: string | null;
+        description?: string | null;
+        milestone?: string | null;
         start_date?: string | null;
         end_date?: string | null;
         status?: SprintStatus;
@@ -62,19 +68,23 @@ export class SprintService {
         if (
             input.name === undefined &&
             input.goal === undefined &&
+            input.description === undefined &&
+            input.milestone === undefined &&
             input.start_date === undefined &&
             input.end_date === undefined &&
             input.status === undefined
         ) {
-            throw new ValidationError('At least one field (name, goal, start_date, end_date, or status) must be provided.');
+            throw new ValidationError('At least one field (name, goal, description, milestone, start_date, end_date, or status) must be provided.');
         }
         this.ensureProjectExists(input.project_id);
         this.ensureSprintExists(input.project_id, input.sprint_id);
         this.validateDateRange(input.start_date ?? null, input.end_date ?? null);
 
+        const goalUpdate = input.goal !== undefined ? input.goal : input.description;
         return this.sprintRepository.updateSprint(input.project_id, input.sprint_id, {
             name: input.name,
-            goal: input.goal,
+            goal: goalUpdate,
+            milestone: input.milestone,
             start_date: input.start_date,
             end_date: input.end_date,
             status: input.status,
