@@ -26,15 +26,19 @@ import { closeSprintTool } from "./closeSprintTool.js";
 import { createEpicTool } from "./createEpicTool.js";
 import { createSprintTool } from "./createSprintTool.js";
 import { createStoryTool } from "./createStoryTool.js";
+import { createWorkItemsBatchTool } from "./createWorkItemsBatchTool.js";
 import { assignToSprintTool } from "./assignToSprintTool.js";
+import { closeWorkItemsBatchTool } from "./closeWorkItemsBatchTool.js";
 import { getEpicProgressTool } from "./getEpicProgressTool.js";
 import { getSprintBacklogTool } from "./getSprintBacklogTool.js";
 import { getSprintProgressTool } from "./getSprintProgressTool.js";
+import { importBacklogTool } from "./importBacklogTool.js";
 import { listEpicsTool } from "./listEpicsTool.js";
 import { listStoriesTool } from "./listStoriesTool.js";
 import { listSprintsTool } from "./listSprintsTool.js";
 import { startSprintTool } from "./startSprintTool.js";
 import { updateSprintTool } from "./updateSprintTool.js";
+import { updateWorkItemsBatchTool } from "./updateWorkItemsBatchTool.js";
 // import { yourTool } from "./yourTool.js"; // Add other new tool imports here
 
 /**
@@ -76,6 +80,10 @@ export function registerTools(server: McpServer): void {
         getSprintProgressTool(server, taskService);
         getSprintBacklogTool(server, taskService);
         assignToSprintTool(server, taskService);
+        createWorkItemsBatchTool(server, taskService);
+        updateWorkItemsBatchTool(server, taskService);
+        closeWorkItemsBatchTool(server, taskService);
+        importBacklogTool(server, taskService);
         createEpicTool(server, taskService);
         listEpicsTool(server, taskService);
         createStoryTool(server, taskService);

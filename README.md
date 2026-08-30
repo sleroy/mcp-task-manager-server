@@ -92,6 +92,22 @@ The following tools are available for MCP clients:
   * **Description:** Bulk assigns or unassigns stories/tasks to a sprint. Epics cannot be assigned directly.
   * **Params:** `project_id` (string, required, UUID), `task_ids` (string[], required), `sprint_id` (UUID|null, required)
   * **Returns:** `{ assigned_count: number, sprint_id: string|null }`
+* **`createWorkItemsBatch`**:
+  * **Description:** Atomically creates multiple epics, stories, and tasks. Supports `client_id` references so children and dependencies can point to earlier batch items.
+  * **Params:** `project_id` (string, required, UUID), `items` (array, 1-100), `dry_run` (boolean, optional)
+  * **Returns:** `{ dry_run, created_count, id_map, items }`
+* **`updateWorkItemsBatch`**:
+  * **Description:** Atomically updates multiple work items.
+  * **Params:** `project_id` (string, required, UUID), `updates` (array, 1-100), `dry_run` (boolean, optional)
+  * **Returns:** `{ dry_run, updated_count, task_ids }`
+* **`closeWorkItemsBatch`**:
+  * **Description:** Atomically closes multiple work items, optionally including descendants.
+  * **Params:** `project_id` (string, required, UUID), `task_ids` (string[], required), `include_subtasks` (boolean, optional, default true), `dry_run` (boolean, optional)
+  * **Returns:** `{ dry_run, closed_count, task_ids }`
+* **`importBacklog`**:
+  * **Description:** Imports an agent-generated backlog of epics with nested stories and tasks, optionally assigning stories/tasks to a sprint.
+  * **Params:** `project_id` (string, required, UUID), `sprint_id` (UUID|null, optional), `epics` (array, 1-50), `dry_run` (boolean, optional)
+  * **Returns:** `{ dry_run, created_count, id_map, items }`
 * **`closeSprint`**:
   * **Description:** Closes a sprint and, by default, marks all assigned work items done.
   * **Params:** `project_id` (string, required, UUID), `sprint_id` (string, required, UUID), `close_tasks` (boolean, optional, default true)

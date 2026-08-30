@@ -65,6 +65,50 @@ export interface EpicProgress {
     by_status: Record<TaskStatus, number>;
 }
 
+export interface BatchCreateWorkItemInput extends AddTaskInput {
+    client_id?: string;
+    parent_client_id?: string;
+    dependency_client_ids?: string[];
+}
+
+export interface BatchCreateWorkItemsResult {
+    dry_run: boolean;
+    created_count: number;
+    id_map: Record<string, string>;
+    items: TaskData[];
+}
+
+export interface BatchUpdateWorkItemInput {
+    task_id: string;
+    description?: string;
+    priority?: TaskPriority;
+    parent_task_id?: string | null;
+    sprint_id?: string | null;
+    dependencies?: string[];
+}
+
+export interface BatchUpdateWorkItemsResult {
+    dry_run: boolean;
+    updated_count: number;
+    task_ids: string[];
+}
+
+export interface BatchCloseWorkItemsResult {
+    dry_run: boolean;
+    closed_count: number;
+    task_ids: string[];
+}
+
+export interface BacklogImportNode {
+    client_id?: string;
+    description: string;
+    priority?: TaskPriority;
+    status?: TaskStatus;
+    sprint_id?: string | null;
+    stories?: BacklogImportNode[];
+    tasks?: BacklogImportNode[];
+}
+
 export class TaskService {
     constructor(
         private db: Db,
@@ -100,6 +144,181 @@ export class TaskService {
 
         this.taskRepository.create(newTaskData, input.dependencies ?? []);
         return newTaskData;
+    }
+
+    public async createWorkItemsBatch(
+        projectId: string,
+        items: BatchCreateWorkItemInput[],
+        dryRun = false
+    ): Promise<BatchCreateWorkItemsResult> {
+        this.ensureProjectExists(projectId);
+        const { resolvedItems, idMap } = this.prepareBatchCreates(projectId, items);
+
+        if (!dryRun) {
+            const transaction = this.db.transaction(() => {
+                for (const item of resolvedItems) {
+                    this.taskRepository.create(item.task, []);
+                }
+                const insertDependencyStmt = this.db.prepare(`
+                    INSERT INTO task_dependencies (task_id, depends_on_task_id)
+                    VALUES (?, ?)
+                    ON CONFLICT(task_id, depends_on_task_id) DO NOTHING
+                `);
+                for (const item of resolvedItems) {
+                    for (const dependency of item.dependencies) {
+                        insertDependencyStmt.run(item.task.task_id, dependency);
+                    }
+                }
+            });
+            transaction();
+        }
+
+        return {
+            dry_run: dryRun,
+            created_count: resolvedItems.length,
+            id_map: Object.fromEntries(idMap),
+            items: resolvedItems.map(item => item.task),
+        };
+    }
+
+    public async updateWorkItemsBatch(
+        projectId: string,
+        updates: BatchUpdateWorkItemInput[],
+        dryRun = false
+    ): Promise<BatchUpdateWorkItemsResult> {
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, updates.map(update => update.task_id));
+
+        for (const update of updates) {
+            const existingTask = this.taskRepository.findById(projectId, update.task_id);
+            if (!existingTask) {
+                throw new NotFoundError(`Task with ID ${update.task_id} not found in project ${projectId}.`);
+            }
+            this.validateWorkItemPlacement(
+                projectId,
+                existingTask.item_type,
+                update.parent_task_id !== undefined ? update.parent_task_id : existingTask.parent_task_id ?? null,
+                update.sprint_id !== undefined ? update.sprint_id : existingTask.sprint_id ?? null,
+                update.task_id
+            );
+            this.validateDependencies(projectId, update.task_id, update.dependencies);
+        }
+
+        if (!dryRun) {
+            const transaction = this.db.transaction(() => {
+                for (const update of updates) {
+                    this.taskRepository.updateTask(projectId, update.task_id, {
+                        description: update.description,
+                        priority: update.priority,
+                        parent_task_id: update.parent_task_id,
+                        sprint_id: update.sprint_id,
+                        dependencies: update.dependencies,
+                    }, new Date().toISOString());
+                }
+            });
+            transaction();
+        }
+
+        return {
+            dry_run: dryRun,
+            updated_count: updates.length,
+            task_ids: updates.map(update => update.task_id),
+        };
+    }
+
+    public async closeWorkItemsBatch(
+        projectId: string,
+        taskIds: string[],
+        includeSubtasks = true,
+        dryRun = false
+    ): Promise<BatchCloseWorkItemsResult> {
+        this.ensureProjectExists(projectId);
+        this.ensureTasksExist(projectId, taskIds);
+
+        const taskIdsToClose = new Set<string>();
+        for (const taskId of taskIds) {
+            taskIdsToClose.add(taskId);
+            if (includeSubtasks) {
+                for (const descendant of this.taskRepository.findDescendants(projectId, taskId)) {
+                    taskIdsToClose.add(descendant.task_id);
+                }
+            }
+        }
+
+        if (!dryRun) {
+            this.taskRepository.updateStatus(projectId, [...taskIdsToClose], 'done', new Date().toISOString());
+        }
+
+        return {
+            dry_run: dryRun,
+            closed_count: taskIdsToClose.size,
+            task_ids: [...taskIdsToClose],
+        };
+    }
+
+    public async importBacklog(
+        projectId: string,
+        epics: BacklogImportNode[],
+        sprintId?: string | null,
+        dryRun = false
+    ): Promise<BatchCreateWorkItemsResult> {
+        const items: BatchCreateWorkItemInput[] = [];
+        let generatedClientId = 0;
+        const nextClientId = () => `import-${++generatedClientId}`;
+
+        for (const epic of epics) {
+            const epicClientId = epic.client_id ?? nextClientId();
+            items.push({
+                project_id: projectId,
+                client_id: epicClientId,
+                item_type: 'epic',
+                description: epic.description,
+                priority: epic.priority,
+                status: epic.status,
+            });
+
+            for (const story of epic.stories ?? []) {
+                const storyClientId = story.client_id ?? nextClientId();
+                items.push({
+                    project_id: projectId,
+                    client_id: storyClientId,
+                    parent_client_id: epicClientId,
+                    sprint_id: story.sprint_id ?? sprintId ?? null,
+                    item_type: 'story',
+                    description: story.description,
+                    priority: story.priority,
+                    status: story.status,
+                });
+
+                for (const task of story.tasks ?? []) {
+                    items.push({
+                        project_id: projectId,
+                        client_id: task.client_id ?? nextClientId(),
+                        parent_client_id: storyClientId,
+                        sprint_id: task.sprint_id ?? story.sprint_id ?? sprintId ?? null,
+                        item_type: 'task',
+                        description: task.description,
+                        priority: task.priority,
+                        status: task.status,
+                    });
+                }
+            }
+
+            for (const task of epic.tasks ?? []) {
+                items.push({
+                    project_id: projectId,
+                    client_id: task.client_id ?? nextClientId(),
+                    parent_client_id: epicClientId,
+                    sprint_id: task.sprint_id ?? sprintId ?? null,
+                    item_type: 'task',
+                    description: task.description,
+                    priority: task.priority,
+                    status: task.status,
+                });
+            }
+        }
+
+        return this.createWorkItemsBatch(projectId, items, dryRun);
     }
 
     public async listTasks(options: ListTasksOptions): Promise<TaskData[] | StructuredTaskData[]> {
@@ -456,6 +675,150 @@ export class TaskService {
             }
         }
         return rootTasks;
+    }
+
+    private prepareBatchCreates(
+        projectId: string,
+        items: BatchCreateWorkItemInput[]
+    ): {
+        resolvedItems: { task: TaskData; dependencies: string[] }[];
+        idMap: Map<string, string>;
+    } {
+        const idMap = new Map<string, string>();
+        const now = new Date().toISOString();
+        const resolvedItems = items.map(item => {
+            if (item.project_id !== projectId) {
+                throw new ValidationError('All batch work items must use the same project_id.');
+            }
+            if (item.client_id) {
+                if (idMap.has(item.client_id)) {
+                    throw new ValidationError(`Duplicate client_id in batch: ${item.client_id}.`);
+                }
+                idMap.set(item.client_id, uuidv4());
+            }
+
+            return { item, taskId: item.client_id ? idMap.get(item.client_id)! : uuidv4() };
+        });
+
+        const resolvedByClientId = new Map(
+            resolvedItems
+                .filter(item => item.item.client_id)
+                .map(item => [item.item.client_id!, item])
+        );
+        const tasksById = new Map<string, TaskData>();
+        const output: { task: TaskData; dependencies: string[] }[] = [];
+
+        for (const resolved of resolvedItems) {
+            const itemType = resolved.item.item_type ?? 'task';
+            const parentTaskId = this.resolveBatchReference(
+                resolved.item.parent_task_id ?? null,
+                resolved.item.parent_client_id,
+                idMap,
+                'parent'
+            );
+            const sprintId = resolved.item.sprint_id ?? null;
+
+            this.validateBatchPlacement(projectId, itemType, parentTaskId, sprintId, tasksById, resolvedByClientId);
+
+            const dependencies = [
+                ...(resolved.item.dependencies ?? []),
+                ...(resolved.item.dependency_client_ids ?? []).map(clientId => {
+                    const taskId = idMap.get(clientId);
+                    if (!taskId) {
+                        throw new ValidationError(`Unknown dependency client_id in batch: ${clientId}.`);
+                    }
+                    return taskId;
+                }),
+            ];
+            this.validateBatchDependencies(projectId, resolved.taskId, dependencies, tasksById, idMap);
+
+            const task: TaskData = {
+                task_id: resolved.taskId,
+                project_id: projectId,
+                parent_task_id: parentTaskId,
+                sprint_id: sprintId,
+                item_type: itemType,
+                description: resolved.item.description,
+                status: resolved.item.status ?? 'todo',
+                priority: resolved.item.priority ?? 'medium',
+                created_at: now,
+                updated_at: now,
+            };
+            tasksById.set(task.task_id, task);
+            output.push({ task, dependencies });
+        }
+
+        return { resolvedItems: output, idMap };
+    }
+
+    private resolveBatchReference(
+        directId: string | null,
+        clientId: string | undefined,
+        idMap: Map<string, string>,
+        fieldName: string
+    ): string | null {
+        if (directId && clientId) {
+            throw new ValidationError(`Provide either ${fieldName}_task_id or ${fieldName}_client_id, not both.`);
+        }
+        if (!clientId) {
+            return directId;
+        }
+        const resolvedId = idMap.get(clientId);
+        if (!resolvedId) {
+            throw new ValidationError(`Unknown ${fieldName}_client_id in batch: ${clientId}.`);
+        }
+        return resolvedId;
+    }
+
+    private validateBatchPlacement(
+        projectId: string,
+        itemType: WorkItemType,
+        parentTaskId: string | null,
+        sprintId: string | null,
+        batchTasksById: Map<string, TaskData>,
+        resolvedByClientId: Map<string, { item: BatchCreateWorkItemInput; taskId: string }>
+    ): void {
+        if (!parentTaskId || batchTasksById.has(parentTaskId)) {
+            const parentTask = parentTaskId ? batchTasksById.get(parentTaskId) : undefined;
+            if (itemType === 'epic' && parentTaskId) {
+                throw new ValidationError('Epics cannot have a parent task.');
+            }
+            if (itemType === 'epic' && sprintId) {
+                throw new ValidationError('Epics cannot be assigned directly to a sprint.');
+            }
+            if (parentTask && itemType === 'story' && parentTask.item_type !== 'epic') {
+                throw new ValidationError('Stories can only be parented by epics.');
+            }
+            if (parentTask && itemType === 'task' && parentTask.item_type === 'task') {
+                throw new ValidationError('Tasks can only be parented by stories or epics.');
+            }
+            if (sprintId && !this.sprintRepository.findById(projectId, sprintId)) {
+                throw new ValidationError(`Sprint ${sprintId} was not found in project ${projectId}.`);
+            }
+            return;
+        }
+
+        const futureParent = [...resolvedByClientId.values()].find(candidate => candidate.taskId === parentTaskId);
+        if (futureParent) {
+            throw new ValidationError(`Parent client item ${futureParent.item.client_id} must appear before its children in the batch.`);
+        }
+
+        this.validateWorkItemPlacement(projectId, itemType, parentTaskId, sprintId);
+    }
+
+    private validateBatchDependencies(
+        projectId: string,
+        taskId: string,
+        dependencies: string[],
+        batchTasksById: Map<string, TaskData>,
+        idMap: Map<string, string>
+    ): void {
+        if (dependencies.includes(taskId)) {
+            throw new ValidationError(`Task ${taskId} cannot depend on itself.`);
+        }
+        const allBatchTaskIds = new Set(idMap.values());
+        const existingDependencies = dependencies.filter(dependency => !batchTasksById.has(dependency) && !allBatchTaskIds.has(dependency));
+        this.validateDependencies(projectId, taskId, existingDependencies);
     }
 
     private ensureProjectExists(projectId: string): void {
