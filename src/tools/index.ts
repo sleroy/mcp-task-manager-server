@@ -40,6 +40,7 @@ import { listSprintsTool } from "./listSprintsTool.js";
 import { startSprintTool } from "./startSprintTool.js";
 import { updateSprintTool } from "./updateSprintTool.js";
 import { updateWorkItemsBatchTool } from "./updateWorkItemsBatchTool.js";
+import { checkpointDatabaseTool } from "./checkpointDatabaseTool.js";
 // import { yourTool } from "./yourTool.js"; // Add other new tool imports here
 
 /**
@@ -103,6 +104,7 @@ export function registerTools(server: McpServer): void {
         updateTaskTool(server, taskService); // Register the new updateTask tool
         deleteTaskTool(server, taskService); // Register deleteTask tool
         deleteProjectTool(server, projectService); // Register deleteProject tool (uses ProjectService)
+        checkpointDatabaseTool(server, dbManager);
         // ... etc.
 
         logger.info("All tools registered successfully.");

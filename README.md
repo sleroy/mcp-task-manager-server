@@ -20,6 +20,7 @@ This server acts as a persistent backend for local MCP clients (like AI agents o
 * **Work Item Management:** Supports lightweight parent-child hierarchy, dependencies, status changes, and next actionable task selection without requiring a complex project-management workflow.
 * **Sprint Management:** Supports sprint planning, activation, filtered backlog assignment, progress reporting, and closing sprints with their assigned work.
 * **Import/Export:** Allows exporting project data to JSON, writing a local JSON snapshot, and importing from JSON to create new projects.
+* **WAL Checkpointing:** Provides an MCP tool and npm command to flush SQLite WAL changes before committing a tracked database file, and fails loudly if SQLite reports an incomplete checkpoint.
 
 ## Work Model
 
@@ -161,6 +162,10 @@ The following tools are available for MCP clients:
   * **Description:** Permanently deletes a project and ALL associated data. **Use with caution!**
   * **Params:** `project_id` (string, required, UUID)
   * **Returns:** `{ success: true }`
+* **`checkpointDatabase`**:
+  * **Description:** Forces a SQLite `wal_checkpoint(TRUNCATE)` against the configured task-manager database and fails if SQLite reports an incomplete checkpoint.
+  * **Params:** none
+  * **Returns:** `{ database_path: string, mode: 'TRUNCATE', busy: number, log: number, checkpointed: number }`
 
 *(Note: Refer to the corresponding `src/tools/*Params.ts` files for detailed Zod schemas and parameter descriptions.)*
 
@@ -196,6 +201,26 @@ The following tools are available for MCP clients:
 
 * **Database Path:** The location of the SQLite database file can be overridden by setting the `DATABASE_PATH` environment variable. The default is `./data/taskmanager.db`.
 * **Log Level:** The logging level can be set using the `LOG_LEVEL` environment variable (e.g., `debug`, `info`, `warn`, `error`). The default is `info`.
+
+## Flushing SQLite WAL Before Commits
+
+The task database uses SQLite WAL mode, so recent changes can live in a `*.db-wal` file until SQLite checkpoints them into the main database file. The server configures aggressive auto-checkpointing, but a pre-commit flush is still useful when the database file itself is tracked.
+
+If the MCP server has been writing the database, call the `checkpointDatabase` MCP tool from that same server before committing. That is the authoritative flush for the live server connection.
+
+For offline or script-driven changes, run:
+
+```bash
+DATABASE_PATH=/path/to/taskmanager.db npm run checkpoint
+```
+
+You can also pass the database path as the first argument:
+
+```bash
+npm run checkpoint -- /path/to/taskmanager.db
+```
+
+Both forms return SQLite checkpoint counters and fail if `busy` is non-zero or `log` does not equal `checkpointed`. If that happens, stop active readers/writers and retry before staging the database.
 
 ## Project Structure
 

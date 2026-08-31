@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url'; // Added for ES Module dirname
 import { ConfigurationManager } from '../config/ConfigurationManager.js';
 import { logger } from '../utils/logger.js'; // Assuming logger exists
 
+export interface WalCheckpointResult {
+    database_path: string;
+    mode: 'TRUNCATE';
+    busy: number;
+    log: number;
+    checkpointed: number;
+}
+
 export class DatabaseManager {
     private static instance: DatabaseManager;
     private db!: Db; // Added definite assignment assertion
@@ -49,6 +57,8 @@ export class DatabaseManager {
             const journalMode = this.db.pragma('journal_mode = WAL') as [{ journal_mode: string }];
             logger.info(`[DatabaseManager] Journal mode set to: ${journalMode[0]?.journal_mode ?? 'unknown'}`);
 
+            const autoCheckpoint = this.db.pragma('wal_autocheckpoint = 1') as [{ wal_autocheckpoint: number }];
+            logger.info(`[DatabaseManager] WAL auto-checkpoint pages: ${autoCheckpoint[0]?.wal_autocheckpoint ?? 'unknown'}`);
 
             // Check if initialization is needed (simple check: does 'projects' table exist?)
             const tableCheck = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects';").get();
@@ -86,6 +96,40 @@ export class DatabaseManager {
             throw new Error('Database connection not available.');
         }
         return this.db;
+    }
+
+    public checkpointWal(): WalCheckpointResult {
+        if (!this.db) {
+            logger.error('[DatabaseManager] Database connection not available.');
+            throw new Error('Database connection not available.');
+        }
+
+        const rows = this.db.pragma('wal_checkpoint(TRUNCATE)') as Array<{
+            busy: number;
+            log: number;
+            checkpointed: number;
+        }>;
+        const row = rows[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+
+        logger.info('[DatabaseManager] WAL checkpoint completed.', {
+            databasePath: this.dbPath,
+            mode: 'TRUNCATE',
+            busy: row.busy,
+            log: row.log,
+            checkpointed: row.checkpointed,
+        });
+
+        if (row.busy !== 0 || row.log !== row.checkpointed) {
+            throw new Error(`SQLite WAL checkpoint did not fully complete for ${this.dbPath}: busy=${row.busy}, log=${row.log}, checkpointed=${row.checkpointed}. Stop active readers/writers and retry before committing the database.`);
+        }
+
+        return {
+            database_path: this.dbPath,
+            mode: 'TRUNCATE',
+            busy: row.busy,
+            log: row.log,
+            checkpointed: row.checkpointed,
+        };
     }
 
     private applyMigrations(): void {
@@ -146,6 +190,7 @@ export class DatabaseManager {
     // Optional: Add a close method for graceful shutdown
     public closeDb(): void {
         if (this.db) {
+            this.checkpointWal();
             this.db.close();
             logger.info('[DatabaseManager] Database connection closed.');
         }
