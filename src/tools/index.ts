@@ -22,6 +22,7 @@ import { importProjectTool } from "./importProjectTool.js";
 import { updateTaskTool } from "./updateTaskTool.js"; // Import the new tool
 import { deleteTaskTool } from "./deleteTaskTool.js"; // Import deleteTask tool
 import { deleteProjectTool } from "./deleteProjectTool.js"; // Import deleteProject tool
+import { updateProjectTool } from "./updateProjectTool.js";
 import { closeTaskTool } from "./closeTaskTool.js";
 import { closeSprintTool } from "./closeSprintTool.js";
 import { createEpicTool } from "./createEpicTool.js";
@@ -104,6 +105,7 @@ export function registerTools(server: McpServer): void {
         updateTaskTool(server, taskService); // Register the new updateTask tool
         deleteTaskTool(server, taskService); // Register deleteTask tool
         deleteProjectTool(server, projectService); // Register deleteProject tool (uses ProjectService)
+        updateProjectTool(server, projectService);
         checkpointDatabaseTool(server, dbManager);
         // ... etc.
 

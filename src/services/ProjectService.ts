@@ -317,4 +317,27 @@ export class ProjectService {
             throw error; // Re-throw database or other errors
         }
     }
+
+    public async updateProject(projectId: string, projectName: string): Promise<ProjectData> {
+        const trimmedProjectName = projectName.trim();
+        if (trimmedProjectName.length === 0 || trimmedProjectName.length > 255) {
+            throw new ValidationError("Project name must be between 1 and 255 characters.");
+        }
+
+        const currentProject = this.projectRepository.findById(projectId);
+        if (!currentProject) {
+            throw new NotFoundError(`Project with ID ${projectId} not found.`);
+        }
+
+        if (currentProject.name === trimmedProjectName) {
+            return currentProject;
+        }
+
+        this.projectRepository.update(projectId, trimmedProjectName);
+        const updatedProject = this.projectRepository.findById(projectId);
+        if (!updatedProject) {
+            throw new NotFoundError(`Project with ID ${projectId} not found after update.`);
+        }
+        return updatedProject;
+    }
 }
