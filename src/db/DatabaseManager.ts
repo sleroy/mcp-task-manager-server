@@ -1,140 +1,172 @@
-import Database, { Database as Db } from 'better-sqlite3';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url'; // Added for ES Module dirname
-import { ConfigurationManager } from '../config/ConfigurationManager.js';
-import { logger } from '../utils/logger.js'; // Assuming logger exists
+import Database, { Database as Db } from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url"; // Added for ES Module dirname
+import { ConfigurationManager } from "../config/ConfigurationManager.js";
+import { logger } from "../utils/logger.js"; // Assuming logger exists
 
 export interface WalCheckpointResult {
-    database_path: string;
-    mode: 'TRUNCATE';
-    busy: number;
-    log: number;
-    checkpointed: number;
+  database_path: string;
+  mode: "TRUNCATE";
+  busy: number;
+  log: number;
+  checkpointed: number;
 }
 
 export class DatabaseManager {
-    private static instance: DatabaseManager;
-    private db!: Db; // Added definite assignment assertion
-    private dbPath: string;
+  private static instance: DatabaseManager;
+  private db!: Db; // Added definite assignment assertion
+  private dbPath: string;
 
-    private constructor() {
-        const configManager = ConfigurationManager.getInstance();
-        // TODO: Get path from configManager once implemented
-        // For now, use a default relative path
-        this.dbPath = configManager.getDatabasePath(); // Assuming this method exists
-        logger.info(`[DatabaseManager] Using database path: ${this.dbPath}`);
+  private constructor() {
+    const configManager = ConfigurationManager.getInstance();
+    // TODO: Get path from configManager once implemented
+    // For now, use a default relative path
+    this.dbPath = configManager.getDatabasePath(); // Assuming this method exists
+    logger.info(`[DatabaseManager] Using database path: ${this.dbPath}`);
 
-        this.initializeDatabase();
+    this.initializeDatabase();
+  }
+
+  public static getInstance(): DatabaseManager {
+    if (!DatabaseManager.instance) {
+      DatabaseManager.instance = new DatabaseManager();
+    }
+    return DatabaseManager.instance;
+  }
+
+  private initializeDatabase(): void {
+    try {
+      const dbDir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dbDir)) {
+        logger.info(`[DatabaseManager] Creating database directory: ${dbDir}`);
+        fs.mkdirSync(dbDir, { recursive: true });
+      }
+
+      const dbExists = fs.existsSync(this.dbPath);
+      logger.info(
+        `[DatabaseManager] Database file ${this.dbPath} exists: ${dbExists}`
+      );
+
+      // Pass a wrapper function for verbose logging to match expected signature
+      this.db = new Database(this.dbPath, {
+        verbose: (message?: unknown, ...additionalArgs: unknown[]) =>
+          logger.debug(
+            { sql: message, params: additionalArgs },
+            "SQLite Query"
+          ),
+      });
+
+      // Always enable foreign keys and WAL mode upon connection
+      this.db.pragma("foreign_keys = ON");
+      // Assert type for pragma result
+      const journalMode = this.db.pragma("journal_mode = WAL") as [
+        { journal_mode: string },
+      ];
+      logger.info(
+        `[DatabaseManager] Journal mode set to: ${journalMode[0]?.journal_mode ?? "unknown"}`
+      );
+
+      const autoCheckpoint = this.db.pragma("wal_autocheckpoint = 1") as [
+        { wal_autocheckpoint: number },
+      ];
+      logger.info(
+        `[DatabaseManager] WAL auto-checkpoint pages: ${autoCheckpoint[0]?.wal_autocheckpoint ?? "unknown"}`
+      );
+
+      // Check if initialization is needed (simple check: does 'projects' table exist?)
+      const tableCheck = this.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='projects';"
+        )
+        .get();
+
+      if (!tableCheck) {
+        logger.info(
+          "[DatabaseManager] Projects table not found. Initializing schema..."
+        );
+        // Revert to looking for schema.sql relative to the compiled JS file's directory (__dirname)
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename); // This will be dist/db when running compiled code
+        const schemaPath = path.join(__dirname, "schema.sql");
+
+        logger.info(
+          `[DatabaseManager] Looking for schema file at: ${schemaPath}`
+        );
+        if (!fs.existsSync(schemaPath)) {
+          logger.error(
+            `[DatabaseManager] Schema file not found at ${schemaPath}. Ensure build process copied it correctly.`
+          );
+          throw new Error(
+            `Schema file not found at ${schemaPath}. Build process might be incomplete.`
+          );
+        }
+        const schemaSql = fs.readFileSync(schemaPath, "utf8");
+        this.db.exec(schemaSql);
+        logger.info(
+          "[DatabaseManager] Database schema initialized successfully."
+        );
+      } else {
+        logger.info("[DatabaseManager] Database schema already initialized.");
+        this.applyMigrations();
+      }
+    } catch (error) {
+      logger.error("[DatabaseManager] Failed to initialize database:", error);
+      // Propagate the error to prevent the server from starting with a broken DB connection
+      throw error;
+    }
+  }
+
+  public getDb(): Db {
+    if (!this.db) {
+      // This should ideally not happen if constructor succeeded
+      logger.error("[DatabaseManager] Database connection not available.");
+      throw new Error("Database connection not available.");
+    }
+    return this.db;
+  }
+
+  public checkpointWal(): WalCheckpointResult {
+    if (!this.db) {
+      logger.error("[DatabaseManager] Database connection not available.");
+      throw new Error("Database connection not available.");
     }
 
-    public static getInstance(): DatabaseManager {
-        if (!DatabaseManager.instance) {
-            DatabaseManager.instance = new DatabaseManager();
-        }
-        return DatabaseManager.instance;
+    const rows = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>;
+    const row = rows[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+
+    logger.info("[DatabaseManager] WAL checkpoint completed.", {
+      databasePath: this.dbPath,
+      mode: "TRUNCATE",
+      busy: row.busy,
+      log: row.log,
+      checkpointed: row.checkpointed,
+    });
+
+    if (row.busy !== 0 || row.log !== row.checkpointed) {
+      throw new Error(
+        `SQLite WAL checkpoint did not fully complete for ${this.dbPath}: busy=${row.busy}, log=${row.log}, checkpointed=${row.checkpointed}. Stop active readers/writers and retry before committing the database.`
+      );
     }
 
-    private initializeDatabase(): void {
-        try {
-            const dbDir = path.dirname(this.dbPath);
-            if (!fs.existsSync(dbDir)) {
-                logger.info(`[DatabaseManager] Creating database directory: ${dbDir}`);
-                fs.mkdirSync(dbDir, { recursive: true });
-            }
+    return {
+      database_path: this.dbPath,
+      mode: "TRUNCATE",
+      busy: row.busy,
+      log: row.log,
+      checkpointed: row.checkpointed,
+    };
+  }
 
-            const dbExists = fs.existsSync(this.dbPath);
-            logger.info(`[DatabaseManager] Database file ${this.dbPath} exists: ${dbExists}`);
-
-            // Pass a wrapper function for verbose logging to match expected signature
-            this.db = new Database(this.dbPath, {
-                verbose: (message?: any, ...additionalArgs: any[]) => logger.debug({ sql: message, params: additionalArgs }, 'SQLite Query')
-            });
-
-            // Always enable foreign keys and WAL mode upon connection
-            this.db.pragma('foreign_keys = ON');
-            // Assert type for pragma result
-            const journalMode = this.db.pragma('journal_mode = WAL') as [{ journal_mode: string }];
-            logger.info(`[DatabaseManager] Journal mode set to: ${journalMode[0]?.journal_mode ?? 'unknown'}`);
-
-            const autoCheckpoint = this.db.pragma('wal_autocheckpoint = 1') as [{ wal_autocheckpoint: number }];
-            logger.info(`[DatabaseManager] WAL auto-checkpoint pages: ${autoCheckpoint[0]?.wal_autocheckpoint ?? 'unknown'}`);
-
-            // Check if initialization is needed (simple check: does 'projects' table exist?)
-            const tableCheck = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects';").get();
-
-            if (!tableCheck) {
-                logger.info('[DatabaseManager] Projects table not found. Initializing schema...');
-                // Revert to looking for schema.sql relative to the compiled JS file's directory (__dirname)
-                const __filename = fileURLToPath(import.meta.url);
-                const __dirname = path.dirname(__filename); // This will be dist/db when running compiled code
-                const schemaPath = path.join(__dirname, 'schema.sql');
-
-                logger.info(`[DatabaseManager] Looking for schema file at: ${schemaPath}`);
-                if (!fs.existsSync(schemaPath)) {
-                    logger.error(`[DatabaseManager] Schema file not found at ${schemaPath}. Ensure build process copied it correctly.`);
-                    throw new Error(`Schema file not found at ${schemaPath}. Build process might be incomplete.`);
-                }
-                const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-                this.db.exec(schemaSql);
-                logger.info('[DatabaseManager] Database schema initialized successfully.');
-            } else {
-                logger.info('[DatabaseManager] Database schema already initialized.');
-                this.applyMigrations();
-            }
-        } catch (error) {
-            logger.error('[DatabaseManager] Failed to initialize database:', error);
-            // Propagate the error to prevent the server from starting with a broken DB connection
-            throw error;
-        }
-    }
-
-    public getDb(): Db {
-        if (!this.db) {
-            // This should ideally not happen if constructor succeeded
-            logger.error('[DatabaseManager] Database connection not available.');
-            throw new Error('Database connection not available.');
-        }
-        return this.db;
-    }
-
-    public checkpointWal(): WalCheckpointResult {
-        if (!this.db) {
-            logger.error('[DatabaseManager] Database connection not available.');
-            throw new Error('Database connection not available.');
-        }
-
-        const rows = this.db.pragma('wal_checkpoint(TRUNCATE)') as Array<{
-            busy: number;
-            log: number;
-            checkpointed: number;
-        }>;
-        const row = rows[0] ?? { busy: 0, log: 0, checkpointed: 0 };
-
-        logger.info('[DatabaseManager] WAL checkpoint completed.', {
-            databasePath: this.dbPath,
-            mode: 'TRUNCATE',
-            busy: row.busy,
-            log: row.log,
-            checkpointed: row.checkpointed,
-        });
-
-        if (row.busy !== 0 || row.log !== row.checkpointed) {
-            throw new Error(`SQLite WAL checkpoint did not fully complete for ${this.dbPath}: busy=${row.busy}, log=${row.log}, checkpointed=${row.checkpointed}. Stop active readers/writers and retry before committing the database.`);
-        }
-
-        return {
-            database_path: this.dbPath,
-            mode: 'TRUNCATE',
-            busy: row.busy,
-            log: row.log,
-            checkpointed: row.checkpointed,
-        };
-    }
-
-    private applyMigrations(): void {
-        const migration = this.db.transaction(() => {
-            this.db.exec(`
+  private applyMigrations(): void {
+    this.db.pragma("foreign_keys = OFF");
+    try {
+      const migration = this.db.transaction(() => {
+        this.db.exec(`
                 CREATE TABLE IF NOT EXISTS sprints (
                     sprint_id TEXT PRIMARY KEY NOT NULL,
                     project_id TEXT NOT NULL,
@@ -143,37 +175,50 @@ export class DatabaseManager {
                     milestone TEXT NULL,
                     start_date TEXT NULL,
                     end_date TEXT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed')),
+                    status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed', 'cancelled')),
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
                 );
             `);
 
-            const taskColumns = this.db.pragma('table_info(tasks)') as { name: string }[];
-            const columnNames = new Set(taskColumns.map(column => column.name));
+        const taskColumns = this.db.pragma("table_info(tasks)") as {
+          name: string;
+        }[];
+        const columnNames = new Set(taskColumns.map((column) => column.name));
 
-            if (!columnNames.has('sprint_id')) {
-                this.db.exec('ALTER TABLE tasks ADD COLUMN sprint_id TEXT NULL REFERENCES sprints(sprint_id) ON DELETE SET NULL;');
-                logger.info('[DatabaseManager] Added tasks.sprint_id column.');
-            }
-            if (!columnNames.has('item_type')) {
-                this.db.exec("ALTER TABLE tasks ADD COLUMN item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task'));");
-                logger.info('[DatabaseManager] Added tasks.item_type column.');
-            }
-            if (!columnNames.has('milestone')) {
-                this.db.exec('ALTER TABLE tasks ADD COLUMN milestone TEXT NULL;');
-                logger.info('[DatabaseManager] Added tasks.milestone column.');
-            }
+        if (!columnNames.has("sprint_id")) {
+          this.db.exec(
+            "ALTER TABLE tasks ADD COLUMN sprint_id TEXT NULL REFERENCES sprints(sprint_id) ON DELETE SET NULL;"
+          );
+          logger.info("[DatabaseManager] Added tasks.sprint_id column.");
+        }
+        if (!columnNames.has("item_type")) {
+          this.db.exec(
+            "ALTER TABLE tasks ADD COLUMN item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task'));"
+          );
+          logger.info("[DatabaseManager] Added tasks.item_type column.");
+        }
+        if (!columnNames.has("milestone")) {
+          this.db.exec("ALTER TABLE tasks ADD COLUMN milestone TEXT NULL;");
+          logger.info("[DatabaseManager] Added tasks.milestone column.");
+        }
 
-            const sprintColumns = this.db.pragma('table_info(sprints)') as { name: string }[];
-            const sprintColumnNames = new Set(sprintColumns.map(column => column.name));
-            if (!sprintColumnNames.has('milestone')) {
-                this.db.exec('ALTER TABLE sprints ADD COLUMN milestone TEXT NULL;');
-                logger.info('[DatabaseManager] Added sprints.milestone column.');
-            }
+        const sprintColumns = this.db.pragma("table_info(sprints)") as {
+          name: string;
+        }[];
+        const sprintColumnNames = new Set(
+          sprintColumns.map((column) => column.name)
+        );
+        if (!sprintColumnNames.has("milestone")) {
+          this.db.exec("ALTER TABLE sprints ADD COLUMN milestone TEXT NULL;");
+          logger.info("[DatabaseManager] Added sprints.milestone column.");
+        }
 
-            this.db.exec(`
+        this.migrateTaskStatusConstraint();
+        this.migrateSprintStatusConstraint();
+
+        this.db.exec(`
                 CREATE INDEX IF NOT EXISTS idx_tasks_sprint_id ON tasks(sprint_id);
                 CREATE INDEX IF NOT EXISTS idx_tasks_item_type ON tasks(item_type);
                 CREATE INDEX IF NOT EXISTS idx_tasks_milestone ON tasks(milestone);
@@ -181,18 +226,119 @@ export class DatabaseManager {
                 CREATE INDEX IF NOT EXISTS idx_sprints_status ON sprints(status);
                 CREATE INDEX IF NOT EXISTS idx_sprints_milestone ON sprints(milestone);
             `);
-        });
+      });
 
-        migration();
-        logger.info('[DatabaseManager] Database migrations applied successfully.');
+      migration();
+    } finally {
+      this.db.pragma("foreign_keys = ON");
     }
 
-    // Optional: Add a close method for graceful shutdown
-    public closeDb(): void {
-        if (this.db) {
-            this.checkpointWal();
-            this.db.close();
-            logger.info('[DatabaseManager] Database connection closed.');
-        }
+    const foreignKeyViolations = this.db.pragma(
+      "foreign_key_check"
+    ) as unknown[];
+    if (foreignKeyViolations.length > 0) {
+      throw new Error(
+        `Database migration left ${foreignKeyViolations.length} foreign key violation(s).`
+      );
     }
+
+    logger.info("[DatabaseManager] Database migrations applied successfully.");
+  }
+
+  private migrateTaskStatusConstraint(): void {
+    const tableSql = this.getCreateTableSql("tasks");
+    if (!tableSql || tableSql.includes("'cancelled'")) {
+      return;
+    }
+
+    this.db.exec(`
+            CREATE TABLE tasks_new (
+                task_id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL,
+                parent_task_id TEXT NULL,
+                sprint_id TEXT NULL,
+                item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task')),
+                milestone TEXT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('todo', 'in-progress', 'review', 'done', 'cancelled')),
+                priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+                FOREIGN KEY (parent_task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+                FOREIGN KEY (sprint_id) REFERENCES sprints(sprint_id) ON DELETE SET NULL
+            );
+
+            INSERT INTO tasks_new (
+                task_id, project_id, parent_task_id, sprint_id, item_type, milestone, description,
+                status, priority, created_at, updated_at
+            )
+            SELECT
+                task_id, project_id, parent_task_id, sprint_id, item_type, milestone, description,
+                status, priority, created_at, updated_at
+            FROM tasks;
+
+            DROP TABLE tasks;
+            ALTER TABLE tasks_new RENAME TO tasks;
+        `);
+    logger.info(
+      "[DatabaseManager] Migrated tasks.status constraint to include 'cancelled'."
+    );
+  }
+
+  private migrateSprintStatusConstraint(): void {
+    const tableSql = this.getCreateTableSql("sprints");
+    if (!tableSql || tableSql.includes("'cancelled'")) {
+      return;
+    }
+
+    this.db.exec(`
+            CREATE TABLE sprints_new (
+                sprint_id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                goal TEXT NULL,
+                milestone TEXT NULL,
+                start_date TEXT NULL,
+                end_date TEXT NULL,
+                status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed', 'cancelled')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+            );
+
+            INSERT INTO sprints_new (
+                sprint_id, project_id, name, goal, milestone, start_date, end_date,
+                status, created_at, updated_at
+            )
+            SELECT
+                sprint_id, project_id, name, goal, milestone, start_date, end_date,
+                status, created_at, updated_at
+            FROM sprints;
+
+            DROP TABLE sprints;
+            ALTER TABLE sprints_new RENAME TO sprints;
+        `);
+    logger.info(
+      "[DatabaseManager] Migrated sprints.status constraint to include 'cancelled'."
+    );
+  }
+
+  private getCreateTableSql(tableName: string): string | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?"
+      )
+      .get(tableName) as { sql?: string } | undefined;
+    return row?.sql;
+  }
+
+  // Optional: Add a close method for graceful shutdown
+  public closeDb(): void {
+    if (this.db) {
+      this.checkpointWal();
+      this.db.close();
+      logger.info("[DatabaseManager] Database connection closed.");
+    }
+  }
 }

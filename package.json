@@ -11,7 +11,7 @@
     "checkpoint": "node scripts/checkpoint-database.mjs",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node scripts/test-cancelled-status.mjs",
     "prepare": "husky install || true"
   },
   "keywords": [

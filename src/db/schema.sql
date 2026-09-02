@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sprints (
     milestone TEXT NULL,
     start_date TEXT NULL, -- ISO8601 date (YYYY-MM-DD) or null
     end_date TEXT NULL, -- ISO8601 date (YYYY-MM-DD) or null
-    status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed')),
+    status TEXT NOT NULL CHECK(status IN ('planned', 'active', 'closed', 'cancelled')),
     created_at TEXT NOT NULL, -- ISO8601 format
     updated_at TEXT NOT NULL, -- ISO8601 format
     FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     item_type TEXT NOT NULL DEFAULT 'task' CHECK(item_type IN ('epic', 'story', 'task')),
     milestone TEXT NULL,
     description TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('todo', 'in-progress', 'review', 'done')),
+    status TEXT NOT NULL CHECK(status IN ('todo', 'in-progress', 'review', 'done', 'cancelled')),
     priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
     created_at TEXT NOT NULL, -- ISO8601 format
     updated_at TEXT NOT NULL, -- ISO8601 format
