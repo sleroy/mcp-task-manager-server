@@ -10,6 +10,7 @@ import { ProjectService, TaskService } from "../services/index.js"; // Using bar
 // import { exampleTool } from "./exampleTool.js"; // Commenting out example
 import { createProjectTool } from "./createProjectTool.js";
 import { addTaskTool } from "./addTaskTool.js";
+import { searchProjectsTool } from "./searchProjectsTool.js";
 import { listTasksTool } from "./listTasksTool.js";
 import { showTaskTool } from "./showTaskTool.js";
 import { setTaskStatusTool } from "./setTaskStatusTool.js";
@@ -51,6 +52,7 @@ export function registerTools(server: McpServer): void {
         // exampleTool(server, configManager.getExampleServiceConfig()); // Example commented out
 
         createProjectTool(server, projectService);
+        searchProjectsTool(server, projectService);
         addTaskTool(server, taskService);
         listTasksTool(server, taskService);
         showTaskTool(server, taskService);

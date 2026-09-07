@@ -74,6 +74,17 @@ export class ProjectService {
         }
     }
 
+    /** Finds projects so callers can obtain a project ID before using project-scoped tools. */
+    public async searchProjects(query: string | undefined, limit: number): Promise<ProjectData[]> {
+        logger.info(`[ProjectService] Searching projects with query '${query?.trim() || 'all'}'.`);
+        try {
+            return this.projectRepository.search(query, limit);
+        } catch (error) {
+            logger.error(`[ProjectService] Error searching projects:`, error);
+            throw error;
+        }
+    }
+
     /**
      * Exports all data for a given project as a JSON string.
      */

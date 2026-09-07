@@ -27,6 +27,10 @@ The following tools are available for MCP clients:
   * **Description:** Creates a new, empty project.
   * **Params:** `projectName` (string, optional, max 255)
   * **Returns:** `{ project_id: string }`
+* **`searchProjects`**:
+  * **Description:** Discovers project IDs by listing recent projects or searching by a case-insensitive project name/ID fragment. Use this before project-scoped tools when the ID is unknown.
+  * **Params:** `query` (string, optional, 1-255), `limit` (integer, optional, default 25, max 100)
+  * **Returns:** Array of `{ project_id, name, created_at }`, newest first.
 * **`addTask`**:
   * **Description:** Adds a new task to a project.
   * **Params:** `project_id` (string, required, UUID), `description` (string, required, 1-1024), `dependencies` (string[], optional, max 50), `priority` (enum 'high'|'medium'|'low', optional, default 'medium'), `status` (enum 'todo'|'in-progress'|'review'|'done', optional, default 'todo')

@@ -53,6 +53,42 @@ export class ProjectRepository {
         }
     }
 
+    /** Finds projects by a case-insensitive name or ID fragment. */
+    public search(query: string | undefined, limit: number): ProjectData[] {
+        const normalizedQuery = query?.trim();
+        const sql = normalizedQuery
+            ? `
+                SELECT project_id, name, created_at
+                FROM projects
+                WHERE name LIKE ? ESCAPE '\\' COLLATE NOCASE
+                   OR project_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                ORDER BY created_at DESC
+                LIMIT ?
+            `
+            : `
+                SELECT project_id, name, created_at
+                FROM projects
+                ORDER BY created_at DESC
+                LIMIT ?
+            `;
+
+        try {
+            const stmt = this.db.prepare(sql);
+            const projects = (normalizedQuery
+                ? stmt.all(`%${this.escapeLike(normalizedQuery)}%`, `%${this.escapeLike(normalizedQuery)}%`, limit)
+                : stmt.all(limit)) as ProjectData[];
+            logger.debug(`[ProjectRepository] Found ${projects.length} project(s) for query '${normalizedQuery || 'all'}'.`);
+            return projects;
+        } catch (error) {
+            logger.error(`[ProjectRepository] Failed to search projects for query '${normalizedQuery || 'all'}':`, error);
+            throw error;
+        }
+    }
+
+    private escapeLike(value: string): string {
+        return value.replace(/([\\%_])/g, '\\$1');
+    }
+
     /**
      * Deletes a project by its ID.
      * Relies on ON DELETE CASCADE in the schema to remove associated tasks/dependencies.
