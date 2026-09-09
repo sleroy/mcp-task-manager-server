@@ -114,9 +114,7 @@ After building (`npm run build`), register the server with the Cline CLI:
 cline mcp install task-manager --yes --transport stdio -- node /absolute/path/to/mcp-task-manager-server/dist/server.js
 ```
 
-This writes an entry into `~/.cline/data/settings/cline_mcp_settings.json`. Because the
-default database path is relative, it is recommended to pin `cwd` and `DATABASE_PATH`
-to absolute values so the SQLite file does not depend on the client's working directory:
+This writes an entry into `~/.cline/data/settings/cline_mcp_settings.json`:
 
 ```json
 {
@@ -126,9 +124,7 @@ to absolute values so the SQLite file does not depend on the client's working di
         "type": "stdio",
         "command": "node",
         "args": ["/absolute/path/to/mcp-task-manager-server/dist/server.js"],
-        "cwd": "/absolute/path/to/mcp-task-manager-server",
         "env": {
-          "DATABASE_PATH": "/absolute/path/to/mcp-task-manager-server/data/taskmanager.db",
           "LOG_LEVEL": "info"
         }
       }
@@ -137,11 +133,22 @@ to absolute values so the SQLite file does not depend on the client's working di
 }
 ```
 
+Note that `cwd` is intentionally **not** set. Cline spawns stdio servers without an
+explicit working directory, so the server inherits the directory Cline was launched
+from. Combined with the relative default database path, this means each workspace
+gets its own task database at `./data/taskmanager.db`, relative to where you started
+Cline. Set `cwd` (or an absolute `DATABASE_PATH`) only if you deliberately want a
+single shared database regardless of the launch directory.
+
 To remove it again: `cline mcp uninstall task-manager`.
 
 ## Configuration
 
-* **Database Path:** The location of the SQLite database file can be overridden by setting the `DATABASE_PATH` environment variable. The default is `./data/taskmanager.db`.
+* **Database Path:** The default is `./data/taskmanager.db`, resolved **relative to the
+  process working directory** — i.e. the directory the server (or the MCP client that
+  spawned it) was launched from. The directory is created automatically on first run.
+  Set the `DATABASE_PATH` environment variable to override it, using an absolute path
+  if you want a fixed location independent of the launch directory.
 * **Log Level:** The logging level can be set using the `LOG_LEVEL` environment variable (e.g., `debug`, `info`, `warn`, `error`). The default is `info`.
 
 ## Project Structure

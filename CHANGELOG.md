@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-* Documented Cline CLI installation (`cline mcp install`) in `README.md`, including
-  the recommended absolute `cwd` / `DATABASE_PATH` configuration.
+* Documented Cline CLI installation (`cline mcp install`) in `README.md`, and
+  clarified that the default database path (`./data/taskmanager.db`) resolves
+  relative to the process working directory — i.e. the directory Cline was
+  launched from — giving each workspace its own task database. `cwd` is
+  deliberately left unset in the MCP settings so this inheritance works.
 * Added `CHANGELOG.md`, `docs/adr/template.md` and ADR-0001.
