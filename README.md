@@ -106,6 +106,39 @@ The following tools are available for MCP clients:
     npm start
     ```
 
+## Installing in the Cline CLI
+
+After building (`npm run build`), register the server with the Cline CLI:
+
+```bash
+cline mcp install task-manager --yes --transport stdio -- node /absolute/path/to/mcp-task-manager-server/dist/server.js
+```
+
+This writes an entry into `~/.cline/data/settings/cline_mcp_settings.json`. Because the
+default database path is relative, it is recommended to pin `cwd` and `DATABASE_PATH`
+to absolute values so the SQLite file does not depend on the client's working directory:
+
+```json
+{
+  "mcpServers": {
+    "task-manager": {
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/absolute/path/to/mcp-task-manager-server/dist/server.js"],
+        "cwd": "/absolute/path/to/mcp-task-manager-server",
+        "env": {
+          "DATABASE_PATH": "/absolute/path/to/mcp-task-manager-server/data/taskmanager.db",
+          "LOG_LEVEL": "info"
+        }
+      }
+    }
+  }
+}
+```
+
+To remove it again: `cline mcp uninstall task-manager`.
+
 ## Configuration
 
 * **Database Path:** The location of the SQLite database file can be overridden by setting the `DATABASE_PATH` environment variable. The default is `./data/taskmanager.db`.

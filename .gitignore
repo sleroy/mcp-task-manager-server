@@ -150,6 +150,9 @@ dist/
 
 # End of https://www.toptal.com/developers/gitignore/api/node
 .taskmanagerrules
-docs/
+docs/*
+# Architecture Decision Records are part of the repository history (project rules
+# require ADRs in /docs/adr), so they are explicitly excluded from the docs/ ignore.
+!docs/adr/
 data/taskmanager.db
 data/taskmanager.*
