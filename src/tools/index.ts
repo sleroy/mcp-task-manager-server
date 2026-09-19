@@ -5,7 +5,13 @@ import { DatabaseManager } from "../db/DatabaseManager.js";
 import { ProjectRepository } from "../repositories/ProjectRepository.js";
 import { TaskRepository } from "../repositories/TaskRepository.js"; // Added TaskRepository import
 import { SprintRepository } from "../repositories/SprintRepository.js";
-import { ProjectService, SprintService, TaskService } from "../services/index.js"; // Using barrel file, added TaskService
+import {
+  ProjectService,
+  SprintService,
+  TaskService,
+  ReportService,
+  ReportServerManager,
+} from "../services/index.js"; // Using barrel file, added TaskService
 
 // Import tool registration functions
 // import { exampleTool } from "./exampleTool.js"; // Commenting out example
@@ -42,6 +48,7 @@ import { startSprintTool } from "./startSprintTool.js";
 import { updateSprintTool } from "./updateSprintTool.js";
 import { updateWorkItemsBatchTool } from "./updateWorkItemsBatchTool.js";
 import { checkpointDatabaseTool } from "./checkpointDatabaseTool.js";
+import { startReportServerTool } from "./startReportServerTool.js";
 // import { yourTool } from "./yourTool.js"; // Add other new tool imports here
 
 /**
@@ -50,71 +57,95 @@ import { checkpointDatabaseTool } from "./checkpointDatabaseTool.js";
  * It also instantiates necessary services and repositories.
  */
 export function registerTools(server: McpServer): void {
-    logger.info("Registering tools...");
-    const configManager = ConfigurationManager.getInstance();
+  logger.info("Registering tools...");
+  const configManager = ConfigurationManager.getInstance();
 
-    // --- Instantiate Dependencies ---
-    // Note: Consider dependency injection frameworks for larger applications
-    try {
-        const dbManager = DatabaseManager.getInstance();
-        const db = dbManager.getDb(); // Get the initialized DB connection
+  // --- Instantiate Dependencies ---
+  // Note: Consider dependency injection frameworks for larger applications
+  try {
+    const dbManager = DatabaseManager.getInstance();
+    const db = dbManager.getDb(); // Get the initialized DB connection
 
-        // Instantiate Repositories
-        const projectRepository = new ProjectRepository(db);
-        const taskRepository = new TaskRepository(db); // Instantiate TaskRepository
-        const sprintRepository = new SprintRepository(db);
+    // Instantiate Repositories
+    const projectRepository = new ProjectRepository(db);
+    const taskRepository = new TaskRepository(db); // Instantiate TaskRepository
+    const sprintRepository = new SprintRepository(db);
 
-        // Instantiate Services
-        const projectService = new ProjectService(db, projectRepository, taskRepository, sprintRepository); // Pass db and repos
-        const sprintService = new SprintService(sprintRepository, projectRepository);
-        const taskService = new TaskService(db, taskRepository, projectRepository, sprintRepository); // Instantiate TaskService, passing db and repos
+    // Instantiate Services
+    const projectService = new ProjectService(
+      db,
+      projectRepository,
+      taskRepository,
+      sprintRepository
+    ); // Pass db and repos
+    const sprintService = new SprintService(
+      sprintRepository,
+      projectRepository
+    );
+    const taskService = new TaskService(
+      db,
+      taskRepository,
+      projectRepository,
+      sprintRepository
+    ); // Instantiate TaskService, passing db and repos
+    const reportService = new ReportService(
+      projectRepository,
+      taskRepository,
+      sprintRepository
+    );
+    const reportServerManager = new ReportServerManager(reportService);
 
-        // --- Register Tools ---
-        // Register each tool, passing necessary services
+    // --- Register Tools ---
+    // Register each tool, passing necessary services
 
-        // exampleTool(server, configManager.getExampleServiceConfig()); // Example commented out
+    // exampleTool(server, configManager.getExampleServiceConfig()); // Example commented out
 
-        createProjectTool(server, projectService);
-        createSprintTool(server, sprintService);
-        listSprintsTool(server, sprintService);
-        updateSprintTool(server, sprintService);
-        startSprintTool(server, sprintService);
-        closeSprintTool(server, taskService);
-        getSprintProgressTool(server, taskService);
-        getSprintBacklogTool(server, taskService);
-        assignToSprintTool(server, taskService);
-        createWorkItemsBatchTool(server, taskService);
-        updateWorkItemsBatchTool(server, taskService);
-        closeWorkItemsBatchTool(server, taskService);
-        importBacklogTool(server, taskService);
-        createEpicTool(server, taskService);
-        listEpicsTool(server, taskService);
-        createStoryTool(server, taskService);
-        listStoriesTool(server, taskService);
-        getEpicProgressTool(server, taskService);
-        addTaskTool(server, taskService);
-        listTasksTool(server, taskService);
-        showTaskTool(server, taskService);
-        setTaskStatusTool(server, taskService);
-        closeTaskTool(server, taskService);
-        expandTaskTool(server, taskService);
-        getNextTaskTool(server, taskService);
-        exportProjectTool(server, projectService);
-        exportProjectSnapshotTool(server, projectService);
-        importProjectTool(server, projectService); // Register importProjectTool (uses ProjectService)
-        updateTaskTool(server, taskService); // Register the new updateTask tool
-        deleteTaskTool(server, taskService); // Register deleteTask tool
-        deleteProjectTool(server, projectService); // Register deleteProject tool (uses ProjectService)
-        updateProjectTool(server, projectService);
-        checkpointDatabaseTool(server, dbManager);
-        // ... etc.
+    createProjectTool(server, projectService);
+    createSprintTool(server, sprintService);
+    listSprintsTool(server, sprintService);
+    updateSprintTool(server, sprintService);
+    startSprintTool(server, sprintService);
+    closeSprintTool(server, taskService);
+    getSprintProgressTool(server, taskService);
+    getSprintBacklogTool(server, taskService);
+    assignToSprintTool(server, taskService);
+    createWorkItemsBatchTool(server, taskService);
+    updateWorkItemsBatchTool(server, taskService);
+    closeWorkItemsBatchTool(server, taskService);
+    importBacklogTool(server, taskService);
+    createEpicTool(server, taskService);
+    listEpicsTool(server, taskService);
+    createStoryTool(server, taskService);
+    listStoriesTool(server, taskService);
+    getEpicProgressTool(server, taskService);
+    addTaskTool(server, taskService);
+    listTasksTool(server, taskService);
+    showTaskTool(server, taskService);
+    setTaskStatusTool(server, taskService);
+    closeTaskTool(server, taskService);
+    expandTaskTool(server, taskService);
+    getNextTaskTool(server, taskService);
+    exportProjectTool(server, projectService);
+    exportProjectSnapshotTool(server, projectService);
+    importProjectTool(server, projectService); // Register importProjectTool (uses ProjectService)
+    updateTaskTool(server, taskService); // Register the new updateTask tool
+    deleteTaskTool(server, taskService); // Register deleteTask tool
+    deleteProjectTool(server, projectService); // Register deleteProject tool (uses ProjectService)
+    updateProjectTool(server, projectService);
+    checkpointDatabaseTool(server, dbManager);
+    startReportServerTool(server, reportServerManager);
+    // ... etc.
 
-        logger.info("All tools registered successfully.");
-
-    } catch (error) {
-        logger.error("Failed to instantiate dependencies or register tools:", error);
-        // Depending on the desired behavior, you might want to exit the process
-        // process.exit(1);
-        throw new Error("Failed to initialize server components during tool registration.");
-    }
+    logger.info("All tools registered successfully.");
+  } catch (error) {
+    logger.error(
+      "Failed to instantiate dependencies or register tools:",
+      error
+    );
+    // Depending on the desired behavior, you might want to exit the process
+    // process.exit(1);
+    throw new Error(
+      "Failed to initialize server components during tool registration."
+    );
+  }
 }
