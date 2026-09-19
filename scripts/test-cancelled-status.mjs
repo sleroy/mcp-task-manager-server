@@ -17,6 +17,14 @@ const cancelledTaskId = "55555555-5555-4555-8555-555555555555";
 const openTaskId = "66666666-6666-4666-8666-666666666666";
 const blockedByCancelledId = "77777777-7777-4777-8777-777777777777";
 const cancelledSprintId = "88888888-8888-4888-8888-888888888888";
+const graphTaskAId = "99999999-9999-4999-8999-999999999999";
+const graphTaskBId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const graphTaskCId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const graphTaskDId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const graphTaskEId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const graphTaskFId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const cycleTaskAId = "abababab-abab-4bab-8bab-abababababab";
+const cycleTaskBId = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc";
 const now = "2026-09-02T00:00:00.000Z";
 
 function createService(db) {
@@ -240,6 +248,165 @@ function testMigrationAllowsCancelledStatuses() {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
+async function testNextTaskCandidatesUseDependencyGraphAndComplexity() {
+  const db = new Database(":memory:");
+  db.exec(fs.readFileSync(path.resolve("dist/db/schema.sql"), "utf8"));
+  const { service, projectRepository, sprintRepository, taskRepository } =
+    createService(db);
+  insertProjectAndSprint(projectRepository, sprintRepository);
+
+  insertTask(taskRepository, {
+    task_id: doneTaskId,
+    sprint_id: sprintId,
+    description: "Completed prerequisite",
+    status: "done",
+  });
+  insertTask(taskRepository, {
+    task_id: cancelledTaskId,
+    sprint_id: sprintId,
+    description: "Cancelled prerequisite",
+    status: "cancelled",
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskAId,
+    sprint_id: sprintId,
+    description: "Set up shared foundation",
+    status: "todo",
+    priority: "medium",
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskBId,
+    sprint_id: sprintId,
+    description: "High priority independent fix",
+    status: "todo",
+    priority: "high",
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskCId,
+    sprint_id: sprintId,
+    description: "Build dependent feature",
+    status: "todo",
+    dependencies: [graphTaskAId],
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskDId,
+    sprint_id: sprintId,
+    description: "Build another dependent feature",
+    status: "todo",
+    dependencies: [graphTaskAId],
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskEId,
+    sprint_id: sprintId,
+    description: "Follow-on integration",
+    status: "todo",
+    dependencies: [graphTaskCId],
+  });
+  insertTask(taskRepository, {
+    task_id: graphTaskFId,
+    sprint_id: sprintId,
+    description:
+      "A deliberately larger task with multiple completed prerequisites and enough detail to be considered more complex by the heuristic used for candidate filtering in getNextTask.",
+    status: "todo",
+    priority: "high",
+    dependencies: [doneTaskId, cancelledTaskId],
+  });
+
+  const selection = await service.getNextTaskCandidates(projectId, sprintId, {
+    limit: 3,
+  });
+
+  assert.deepEqual(
+    selection.candidates.map((candidate) => candidate.task.task_id),
+    [graphTaskAId, graphTaskBId, graphTaskFId]
+  );
+  assert.equal(selection.candidates[0].unblocks_count, 2);
+  assert.equal(selection.candidates[0].dependency_depth, 2);
+  assert.equal(selection.blocked_summary.blocked_count, 3);
+
+  const lowComplexitySelection = await service.getNextTaskCandidates(
+    projectId,
+    sprintId,
+    {
+      limit: 3,
+      max_complexity: "low",
+    }
+  );
+  assert.equal(
+    lowComplexitySelection.candidates.some(
+      (candidate) => candidate.task.task_id === graphTaskFId
+    ),
+    false
+  );
+
+  db.close();
+}
+
+async function testDependencyCycleRejected() {
+  const db = new Database(":memory:");
+  db.exec(fs.readFileSync(path.resolve("dist/db/schema.sql"), "utf8"));
+  const { service, projectRepository, sprintRepository, taskRepository } =
+    createService(db);
+  insertProjectAndSprint(projectRepository, sprintRepository);
+
+  insertTask(taskRepository, {
+    task_id: cycleTaskAId,
+    sprint_id: sprintId,
+    description: "Cycle task A",
+    status: "todo",
+  });
+  insertTask(taskRepository, {
+    task_id: cycleTaskBId,
+    sprint_id: sprintId,
+    description: "Cycle task B",
+    status: "todo",
+    dependencies: [cycleTaskAId],
+  });
+
+  await assert.rejects(
+    () =>
+      service.updateTask({
+        project_id: projectId,
+        task_id: cycleTaskAId,
+        dependencies: [cycleTaskBId],
+      }),
+    /would create a cycle/
+  );
+
+  db.close();
+}
+
+async function testBatchDependencyCycleRejected() {
+  const db = new Database(":memory:");
+  db.exec(fs.readFileSync(path.resolve("dist/db/schema.sql"), "utf8"));
+  const { service, projectRepository, sprintRepository } = createService(db);
+  insertProjectAndSprint(projectRepository, sprintRepository);
+
+  await assert.rejects(
+    () =>
+      service.createWorkItemsBatch(projectId, [
+        {
+          project_id: projectId,
+          client_id: "a",
+          description: "Batch cycle A",
+          dependency_client_ids: ["b"],
+        },
+        {
+          project_id: projectId,
+          client_id: "b",
+          description: "Batch cycle B",
+          dependency_client_ids: ["a"],
+        },
+      ]),
+    /Batch dependencies would create a cycle/
+  );
+
+  db.close();
+}
+
 await testCancelledCountsAsDone();
+await testNextTaskCandidatesUseDependencyGraphAndComplexity();
+await testDependencyCycleRejected();
+await testBatchDependencyCycleRejected();
 testMigrationAllowsCancelledStatuses();
 console.log("cancelled status regression tests passed");

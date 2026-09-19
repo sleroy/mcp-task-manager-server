@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  MILESTONE_VS_SPRINT_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from "./sharedParams.js";
 
 export const TOOL_NAME = "createStory";
 
@@ -29,21 +34,24 @@ export const TOOL_PARAMS = z.object({
   description: z
     .string()
     .min(1, "Story description cannot be empty.")
-    .max(1024, "Story description cannot exceed 1024 characters.")
-    .describe("The story description."),
+    .max(
+      WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+      `Story description cannot exceed ${WORK_ITEM_DESCRIPTION_MAX_LENGTH} characters.`
+    )
+    .describe(WORK_ITEM_DESCRIPTION_GUIDANCE),
   sprint_id: z
     .string()
     .uuid("The sprint_id must be a valid UUID.")
     .nullable()
     .optional()
-    .describe("Optional sprint assignment."),
+    .describe(`Optional sprint assignment. ${MILESTONE_VS_SPRINT_GUIDANCE}`),
   milestone: z
     .string()
     .min(1)
     .max(128)
     .nullable()
     .optional()
-    .describe("Optional lightweight milestone label."),
+    .describe(`Optional lightweight milestone label. ${MILESTONE_VS_SPRINT_GUIDANCE}`),
   priority: TaskPriorityEnum.optional()
     .default("medium")
     .describe("Optional story priority. Defaults to 'medium'."),

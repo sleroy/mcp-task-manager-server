@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  MILESTONE_VS_SPRINT_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from "./sharedParams.js";
 
 export const TOOL_NAME = "createEpic";
 
@@ -25,15 +30,18 @@ export const TOOL_PARAMS = z.object({
   description: z
     .string()
     .min(1, "Epic description cannot be empty.")
-    .max(1024, "Epic description cannot exceed 1024 characters.")
-    .describe("The epic description."),
+    .max(
+      WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+      `Epic description cannot exceed ${WORK_ITEM_DESCRIPTION_MAX_LENGTH} characters.`
+    )
+    .describe(WORK_ITEM_DESCRIPTION_GUIDANCE),
   milestone: z
     .string()
     .min(1)
     .max(128)
     .nullable()
     .optional()
-    .describe("Optional lightweight milestone label."),
+    .describe(`Optional lightweight milestone label. ${MILESTONE_VS_SPRINT_GUIDANCE}`),
   priority: TaskPriorityEnum.optional()
     .default("medium")
     .describe("Optional epic priority. Defaults to 'medium'."),

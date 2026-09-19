@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { MILESTONE_VS_SPRINT_GUIDANCE } from "./sharedParams.js";
 
 export const TOOL_NAME = "createSprint";
 
 export const TOOL_DESCRIPTION = `
 Creates a sprint inside a project for planning and tracking executable task work.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 Returns the full sprint object.
 `;
 
@@ -42,7 +44,7 @@ export const TOOL_PARAMS = z.object({
     .nullable()
     .optional()
     .describe(
-      "Optional lightweight milestone label such as M0.1. This is not required to use sprints."
+      `Optional lightweight milestone label such as M0.1. This is not required to use sprints. ${MILESTONE_VS_SPRINT_GUIDANCE}`
     ),
   start_date: z
     .string()

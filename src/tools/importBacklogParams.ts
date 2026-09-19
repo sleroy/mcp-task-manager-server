@@ -1,9 +1,15 @@
 import { z } from "zod";
+import {
+  MILESTONE_VS_SPRINT_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from "./sharedParams.js";
 
 export const TOOL_NAME = "importBacklog";
 
 export const TOOL_DESCRIPTION = `
 Imports an agent-generated backlog of epics with nested stories and tasks, optionally assigning stories/tasks to a sprint.
+Descriptions can be detailed, self-contained prompts that a coding agent can act on directly.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 `;
 
 const TaskStatusEnum = z.enum([
@@ -17,7 +23,7 @@ const TaskPriorityEnum = z.enum(["high", "medium", "low"]);
 
 const TaskNodeSchema = z.object({
   client_id: z.string().min(1).max(128).optional(),
-  description: z.string().min(1).max(1024),
+  description: z.string().min(1).max(WORK_ITEM_DESCRIPTION_MAX_LENGTH),
   priority: TaskPriorityEnum.optional(),
   status: TaskStatusEnum.optional(),
   sprint_id: z.string().uuid().nullable().optional(),

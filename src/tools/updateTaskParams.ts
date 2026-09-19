@@ -1,12 +1,19 @@
 import { z } from 'zod';
 import { TaskPriority, TaskStatus } from '../types/taskTypes.js'; // Import shared types
+import {
+    MILESTONE_VS_SPRINT_GUIDANCE,
+    WORK_ITEM_DESCRIPTION_GUIDANCE,
+    WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from './sharedParams.js';
 
 export const TOOL_NAME = "updateTask";
 
 export const TOOL_DESCRIPTION = `
 Updates specific details of an existing task within a project.
 Requires the project ID and task ID. Allows updating description, priority, parent, sprint assignment, and/or dependencies.
+The description can be a detailed, self-contained prompt that a coding agent can act on directly.
 At least one optional field (description, priority, dependencies) must be provided.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 Returns the full details of the updated task upon success.
 `;
 
@@ -25,9 +32,9 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
 
     description: z.string()
         .min(1, "Description cannot be empty if provided.")
-        .max(1024, "Description cannot exceed 1024 characters.")
+        .max(WORK_ITEM_DESCRIPTION_MAX_LENGTH, `Description cannot exceed ${WORK_ITEM_DESCRIPTION_MAX_LENGTH} characters.`)
         .optional()
-        .describe("Optional. The new textual description for the task (1-1024 characters)."), // Optional, string, limits
+        .describe(`Optional. ${WORK_ITEM_DESCRIPTION_GUIDANCE}`), // Optional, string, limits
 
     priority: z.enum(priorities)
         .optional()
@@ -43,14 +50,14 @@ export const UPDATE_TASK_BASE_SCHEMA = z.object({
         .uuid("The sprint_id must be a valid UUID.")
         .nullable()
         .optional()
-        .describe("Optional. The new sprint assignment, or null to remove the sprint assignment."),
+        .describe(`Optional. The new sprint assignment, or null to remove the sprint assignment. ${MILESTONE_VS_SPRINT_GUIDANCE}`),
 
     milestone: z.string()
         .min(1)
         .max(128)
         .nullable()
         .optional()
-        .describe("Optional. The new lightweight milestone label, or null to remove it."),
+        .describe(`Optional. The new lightweight milestone label, or null to remove it. ${MILESTONE_VS_SPRINT_GUIDANCE}`),
 
     dependencies: z.array(
             z.string()

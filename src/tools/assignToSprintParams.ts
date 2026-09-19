@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { MILESTONE_VS_SPRINT_GUIDANCE } from "./sharedParams.js";
 
 export const TOOL_NAME = "assignToSprint";
 
 export const TOOL_DESCRIPTION = `
 Assigns or unassigns stories/tasks to a sprint by explicit IDs or lightweight selectors.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 `;
 
 const TaskStatusEnum = z.enum([
@@ -58,7 +60,7 @@ export const TOOL_PARAMS = z.object({
     .nullable()
     .optional()
     .describe(
-      "Optional selector for a lightweight milestone label. If omitted and the target sprint has a milestone, that sprint milestone is used."
+      `Optional selector for a lightweight milestone label. If omitted and the target sprint has a milestone, that sprint milestone is used. ${MILESTONE_VS_SPRINT_GUIDANCE}`
     ),
   include_subtasks: z
     .boolean()

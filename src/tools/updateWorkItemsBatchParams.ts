@@ -1,16 +1,21 @@
 import { z } from 'zod';
+import {
+    MILESTONE_VS_SPRINT_GUIDANCE,
+    WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from './sharedParams.js';
 
 export const TOOL_NAME = "updateWorkItemsBatch";
 
 export const TOOL_DESCRIPTION = `
 Atomically updates multiple existing work items, including description, priority, parent, sprint assignment, and dependencies.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 `;
 
 const TaskPriorityEnum = z.enum(['high', 'medium', 'low']);
 
 const BatchUpdateSchema = z.object({
     task_id: z.string().uuid(),
-    description: z.string().min(1).max(1024).optional(),
+    description: z.string().min(1).max(WORK_ITEM_DESCRIPTION_MAX_LENGTH).optional(),
     priority: TaskPriorityEnum.optional(),
     parent_task_id: z.string().uuid().nullable().optional(),
     sprint_id: z.string().uuid().nullable().optional(),

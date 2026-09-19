@@ -1,9 +1,15 @@
 import { z } from "zod";
+import {
+  MILESTONE_VS_SPRINT_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from "./sharedParams.js";
 
 export const TOOL_NAME = "createWorkItemsBatch";
 
 export const TOOL_DESCRIPTION = `
 Atomically creates multiple epics, stories, and tasks. Items may use client_id values so later parents or dependencies can reference earlier items in the same batch.
+Descriptions can be detailed, self-contained prompts that a coding agent can act on directly.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 `;
 
 const TaskStatusEnum = z.enum([
@@ -18,7 +24,7 @@ const WorkItemTypeEnum = z.enum(["epic", "story", "task"]);
 
 const BatchItemSchema = z.object({
   client_id: z.string().min(1).max(128).optional(),
-  description: z.string().min(1).max(1024),
+  description: z.string().min(1).max(WORK_ITEM_DESCRIPTION_MAX_LENGTH),
   item_type: WorkItemTypeEnum.optional().default("task"),
   parent_task_id: z.string().uuid().nullable().optional(),
   parent_client_id: z.string().min(1).max(128).optional(),

@@ -1,11 +1,18 @@
 import { z } from "zod";
+import {
+  MILESTONE_VS_SPRINT_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_GUIDANCE,
+  WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+} from "./sharedParams.js";
 
 export const TOOL_NAME = "addTask";
 
 export const TOOL_DESCRIPTION = `
 Adds a new task to a specified project within the Task Management Server.
-Requires the project ID and a description for the task.
+Requires the project ID and a description for the task. The description can be a
+detailed, self-contained prompt that a coding agent can act on directly.
 Optionally accepts a list of dependency task IDs, a priority level, and an initial status.
+${MILESTONE_VS_SPRINT_GUIDANCE}
 Returns the full details of the newly created task upon success.
 `;
 
@@ -32,10 +39,11 @@ export const TOOL_PARAMS = z.object({
   description: z
     .string()
     .min(1, "Task description cannot be empty.")
-    .max(1024, "Task description cannot exceed 1024 characters.")
-    .describe(
-      "The textual description of the task to be performed (1-1024 characters)."
-    ), // Required, length limits
+    .max(
+      WORK_ITEM_DESCRIPTION_MAX_LENGTH,
+      `Task description cannot exceed ${WORK_ITEM_DESCRIPTION_MAX_LENGTH} characters.`
+    )
+    .describe(WORK_ITEM_DESCRIPTION_GUIDANCE), // Required, length limits
 
   item_type: WorkItemTypeEnum.optional()
     .default("task")
@@ -58,7 +66,7 @@ export const TOOL_PARAMS = z.object({
     .nullable()
     .optional()
     .describe(
-      "Optional sprint assignment. Epics cannot be assigned directly to a sprint."
+      `Optional sprint assignment. Epics cannot be assigned directly to a sprint. ${MILESTONE_VS_SPRINT_GUIDANCE}`
     ),
 
   milestone: z
@@ -68,7 +76,7 @@ export const TOOL_PARAMS = z.object({
     .nullable()
     .optional()
     .describe(
-      "Optional lightweight milestone label such as M0.1. This does not require using sprints or epics."
+      `Optional lightweight milestone label such as M0.1. This does not require using epics. ${MILESTONE_VS_SPRINT_GUIDANCE}`
     ),
 
   dependencies: z

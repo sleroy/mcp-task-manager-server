@@ -2,7 +2,11 @@ import { Database as Db } from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import { ProjectRepository } from "../repositories/ProjectRepository.js";
 import { SprintRepository } from "../repositories/SprintRepository.js";
-import { TaskRepository, TaskData } from "../repositories/TaskRepository.js";
+import {
+  DependencyData,
+  TaskRepository,
+  TaskData,
+} from "../repositories/TaskRepository.js";
 import { TaskPriority, TaskStatus, WorkItemType } from "../types/taskTypes.js";
 import {
   ConflictError,
@@ -39,6 +43,33 @@ export interface StructuredTaskData extends TaskData {
 export interface FullTaskData extends TaskData {
   dependencies: string[];
   subtasks: TaskData[];
+}
+
+export type TaskComplexity = "low" | "medium" | "high";
+
+export interface NextTaskCandidate {
+  task: FullTaskData;
+  score: number;
+  complexity: TaskComplexity;
+  dependency_depth: number;
+  unblocks_count: number;
+  unblocks: string[];
+  reasons: string[];
+}
+
+export interface NextTaskSelection {
+  selected_sprint_id: string | null;
+  candidates: NextTaskCandidate[];
+  blocked_summary: {
+    blocked_count: number;
+    cycle_count: number;
+    cycles: string[][];
+  };
+}
+
+export interface NextTaskSelectionOptions {
+  limit?: number;
+  max_complexity?: TaskComplexity;
 }
 
 export interface ExpandTaskInput {
@@ -601,6 +632,17 @@ export class TaskService {
     projectId: string,
     sprintId?: string
   ): Promise<FullTaskData | null> {
+    const selection = await this.getNextTaskCandidates(projectId, sprintId, {
+      limit: 1,
+    });
+    return selection.candidates[0]?.task ?? null;
+  }
+
+  public async getNextTaskCandidates(
+    projectId: string,
+    sprintId?: string,
+    options: NextTaskSelectionOptions = {}
+  ): Promise<NextTaskSelection> {
     this.ensureProjectExists(projectId);
     let selectedSprintId = sprintId;
 
@@ -613,15 +655,62 @@ export class TaskService {
       );
     }
 
-    const readyTasks = this.taskRepository.findReadyTasks(
-      projectId,
-      selectedSprintId
-    );
-    if (readyTasks.length === 0) {
-      return null;
-    }
+    const allTasks = this.taskRepository.findAllTasksForProject(projectId);
+    const dependencies =
+      this.taskRepository.findAllDependenciesForProject(projectId);
+    const allTasksById = new Map(allTasks.map((task) => [task.task_id, task]));
+    const dependencyMap = this.buildDependencyMap(dependencies);
+    const dependentMap = this.buildDependentMap(dependencies);
+    const cycles = this.findDependencyCycles(allTasks, dependencyMap);
+    const cycleTaskIds = new Set(cycles.flat());
+    const limit = Math.max(1, Math.min(options.limit ?? 3, 10));
+    const maxComplexity = options.max_complexity;
 
-    return this.getTaskById(projectId, readyTasks[0].task_id);
+    const blockedTasks = allTasks.filter(
+      (task) =>
+        task.item_type === "task" &&
+        task.status === "todo" &&
+        this.isTaskInNextTaskScope(task, selectedSprintId) &&
+        (!this.areDependenciesTerminal(task, dependencyMap, allTasksById) ||
+          cycleTaskIds.has(task.task_id))
+    );
+
+    const candidates = allTasks
+      .filter(
+        (task) =>
+          task.item_type === "task" &&
+          task.status === "todo" &&
+          this.isTaskInNextTaskScope(task, selectedSprintId) &&
+          !cycleTaskIds.has(task.task_id) &&
+          this.areDependenciesTerminal(task, dependencyMap, allTasksById)
+      )
+      .map((task) =>
+        this.toNextTaskCandidate(
+          projectId,
+          task,
+          dependencyMap,
+          dependentMap,
+          allTasksById
+        )
+      )
+      .filter(
+        (candidate) =>
+          maxComplexity === undefined ||
+          this.complexityRank(candidate.complexity) <=
+            this.complexityRank(maxComplexity)
+      )
+      .sort((a, b) => this.compareNextTaskCandidates(a, b))
+      .slice(0, limit);
+
+    return {
+      selected_sprint_id: selectedSprintId ?? null,
+      candidates,
+      blocked_summary: {
+        blocked_count: blockedTasks.length,
+        cycle_count: cycles.length,
+        cycles,
+      },
+    };
   }
 
   public async updateTask(input: {
@@ -1014,6 +1103,8 @@ export class TaskService {
       output.push({ task, dependencies });
     }
 
+    this.validateResolvedDependencyGraph(projectId, output);
+
     return { resolvedItems: output, idMap };
   }
 
@@ -1214,6 +1305,47 @@ export class TaskService {
     this.validateDependencies(projectId, taskId, existingDependencies);
   }
 
+  private validateResolvedDependencyGraph(
+    projectId: string,
+    resolvedItems: { task: TaskData; dependencies: string[] }[]
+  ): void {
+    if (resolvedItems.length === 0) {
+      return;
+    }
+
+    const existingTasks = this.taskRepository.findAllTasksForProject(projectId);
+    const existingDependencies =
+      this.taskRepository.findAllDependenciesForProject(projectId);
+    const batchTaskIds = new Set(
+      resolvedItems.map((item) => item.task.task_id)
+    );
+    const combinedTasks = [
+      ...existingTasks.filter((task) => !batchTaskIds.has(task.task_id)),
+      ...resolvedItems.map((item) => item.task),
+    ];
+    const combinedDependencies = [
+      ...existingDependencies.filter(
+        (dependency) => !batchTaskIds.has(dependency.task_id)
+      ),
+      ...resolvedItems.flatMap((item) =>
+        item.dependencies.map((dependencyId) => ({
+          task_id: item.task.task_id,
+          depends_on_task_id: dependencyId,
+        }))
+      ),
+    ];
+    const cycles = this.findDependencyCycles(
+      combinedTasks,
+      this.buildDependencyMap(combinedDependencies)
+    );
+
+    if (cycles.length > 0) {
+      throw new ValidationError(
+        `Batch dependencies would create a cycle: ${cycles[0].join(" -> ")}`
+      );
+    }
+  }
+
   private ensureProjectExists(projectId: string): void {
     if (!this.projectRepository.findById(projectId)) {
       throw new NotFoundError(`Project with ID ${projectId} not found.`);
@@ -1254,6 +1386,314 @@ export class TaskService {
     if (dependencies.includes(taskId)) {
       throw new ValidationError(`Task ${taskId} cannot depend on itself.`);
     }
+
+    if (this.wouldCreateDependencyCycle(projectId, taskId, dependencies)) {
+      throw new ValidationError(
+        `Dependencies for task ${taskId} would create a cycle.`
+      );
+    }
+  }
+
+  private buildDependencyMap(
+    dependencies: DependencyData[]
+  ): Map<string, string[]> {
+    const dependencyMap = new Map<string, string[]>();
+    for (const dependency of dependencies) {
+      const existing = dependencyMap.get(dependency.task_id) ?? [];
+      existing.push(dependency.depends_on_task_id);
+      dependencyMap.set(dependency.task_id, existing);
+    }
+    return dependencyMap;
+  }
+
+  private buildDependentMap(
+    dependencies: DependencyData[]
+  ): Map<string, string[]> {
+    const dependentMap = new Map<string, string[]>();
+    for (const dependency of dependencies) {
+      const existing = dependentMap.get(dependency.depends_on_task_id) ?? [];
+      existing.push(dependency.task_id);
+      dependentMap.set(dependency.depends_on_task_id, existing);
+    }
+    return dependentMap;
+  }
+
+  private isTaskInNextTaskScope(
+    task: TaskData,
+    selectedSprintId?: string | null
+  ): boolean {
+    if (selectedSprintId === undefined) {
+      return true;
+    }
+    if (selectedSprintId === null) {
+      return task.sprint_id === null || task.sprint_id === undefined;
+    }
+    return task.sprint_id === selectedSprintId;
+  }
+
+  private areDependenciesTerminal(
+    task: TaskData,
+    dependencyMap: Map<string, string[]>,
+    allTasksById: Map<string, TaskData>
+  ): boolean {
+    return (dependencyMap.get(task.task_id) ?? []).every((dependencyId) => {
+      const dependency = allTasksById.get(dependencyId);
+      return (
+        dependency !== undefined &&
+        TERMINAL_TASK_STATUSES.has(dependency.status)
+      );
+    });
+  }
+
+  private toNextTaskCandidate(
+    projectId: string,
+    task: TaskData,
+    dependencyMap: Map<string, string[]>,
+    dependentMap: Map<string, string[]>,
+    allTasksById: Map<string, TaskData>
+  ): NextTaskCandidate {
+    const taskWithDetails = {
+      ...task,
+      dependencies: this.taskRepository.findDependencies(task.task_id),
+      subtasks: this.taskRepository.findSubtasks(task.task_id),
+    };
+    const complexity = this.estimateTaskComplexity(
+      task,
+      dependencyMap,
+      allTasksById
+    );
+    const unblocks = this.findTasksUnblockedBy(
+      task.task_id,
+      dependencyMap,
+      dependentMap,
+      allTasksById
+    );
+    const dependencyDepth = this.findDownstreamDependencyDepth(
+      task.task_id,
+      dependentMap,
+      allTasksById
+    );
+    const score = this.scoreNextTaskCandidate(
+      task,
+      complexity,
+      dependencyDepth,
+      unblocks.length
+    );
+    const reasons = [
+      "ready",
+      `${complexity} complexity`,
+      `unblocks ${unblocks.length} task${unblocks.length === 1 ? "" : "s"}`,
+      `dependency depth ${dependencyDepth}`,
+      `${task.priority} priority`,
+    ];
+
+    return {
+      task: taskWithDetails,
+      score,
+      complexity,
+      dependency_depth: dependencyDepth,
+      unblocks_count: unblocks.length,
+      unblocks,
+      reasons,
+    };
+  }
+
+  private estimateTaskComplexity(
+    task: TaskData,
+    dependencyMap: Map<string, string[]>,
+    allTasksById: Map<string, TaskData>
+  ): TaskComplexity {
+    const dependencyCount = dependencyMap.get(task.task_id)?.length ?? 0;
+    const subtaskCount = [...allTasksById.values()].filter(
+      (candidate) => candidate.parent_task_id === task.task_id
+    ).length;
+    const descriptionLength = task.description.trim().length;
+    const score =
+      dependencyCount +
+      subtaskCount * 2 +
+      (descriptionLength > 220 ? 2 : descriptionLength > 120 ? 1 : 0);
+
+    if (score <= 1) {
+      return "low";
+    }
+    if (score <= 3) {
+      return "medium";
+    }
+    return "high";
+  }
+
+  private findTasksUnblockedBy(
+    taskId: string,
+    dependencyMap: Map<string, string[]>,
+    dependentMap: Map<string, string[]>,
+    allTasksById: Map<string, TaskData>
+  ): string[] {
+    return (dependentMap.get(taskId) ?? []).filter((dependentId) => {
+      const dependent = allTasksById.get(dependentId);
+      if (!dependent || dependent.status !== "todo") {
+        return false;
+      }
+
+      return (dependencyMap.get(dependentId) ?? []).every((dependencyId) => {
+        if (dependencyId === taskId) {
+          return true;
+        }
+        const dependency = allTasksById.get(dependencyId);
+        return (
+          dependency !== undefined &&
+          TERMINAL_TASK_STATUSES.has(dependency.status)
+        );
+      });
+    });
+  }
+
+  private findDownstreamDependencyDepth(
+    taskId: string,
+    dependentMap: Map<string, string[]>,
+    allTasksById: Map<string, TaskData>,
+    visited = new Set<string>()
+  ): number {
+    if (visited.has(taskId)) {
+      return 0;
+    }
+    visited.add(taskId);
+
+    const dependentDepths = (dependentMap.get(taskId) ?? [])
+      .filter((dependentId) => allTasksById.get(dependentId)?.status !== "done")
+      .map(
+        (dependentId) =>
+          1 +
+          this.findDownstreamDependencyDepth(
+            dependentId,
+            dependentMap,
+            allTasksById,
+            new Set(visited)
+          )
+      );
+
+    return dependentDepths.length === 0 ? 0 : Math.max(...dependentDepths);
+  }
+
+  private scoreNextTaskCandidate(
+    task: TaskData,
+    complexity: TaskComplexity,
+    dependencyDepth: number,
+    unblocksCount: number
+  ): number {
+    const priorityScore: Record<TaskPriority, number> = {
+      high: 30,
+      medium: 20,
+      low: 10,
+    };
+    const complexityScore: Record<TaskComplexity, number> = {
+      low: 15,
+      medium: 8,
+      high: 0,
+    };
+
+    return (
+      unblocksCount * 100 +
+      dependencyDepth * 25 +
+      priorityScore[task.priority] +
+      complexityScore[complexity]
+    );
+  }
+
+  private compareNextTaskCandidates(
+    a: NextTaskCandidate,
+    b: NextTaskCandidate
+  ): number {
+    if (a.score !== b.score) {
+      return b.score - a.score;
+    }
+    return a.task.created_at.localeCompare(b.task.created_at);
+  }
+
+  private complexityRank(complexity: TaskComplexity): number {
+    const ranks: Record<TaskComplexity, number> = {
+      low: 1,
+      medium: 2,
+      high: 3,
+    };
+    return ranks[complexity];
+  }
+
+  private findDependencyCycles(
+    tasks: TaskData[],
+    dependencyMap: Map<string, string[]>
+  ): string[][] {
+    const taskIds = new Set(tasks.map((task) => task.task_id));
+    const state = new Map<string, "visiting" | "visited">();
+    const stack: string[] = [];
+    const cycleKeys = new Set<string>();
+    const cycles: string[][] = [];
+
+    const visit = (taskId: string): void => {
+      const currentState = state.get(taskId);
+      if (currentState === "visited") {
+        return;
+      }
+      if (currentState === "visiting") {
+        const startIndex = stack.indexOf(taskId);
+        const cycle = [...stack.slice(startIndex), taskId];
+        const key = cycle.slice(0, -1).sort().join("|");
+        if (!cycleKeys.has(key)) {
+          cycleKeys.add(key);
+          cycles.push(cycle);
+        }
+        return;
+      }
+
+      state.set(taskId, "visiting");
+      stack.push(taskId);
+      for (const dependencyId of dependencyMap.get(taskId) ?? []) {
+        if (taskIds.has(dependencyId)) {
+          visit(dependencyId);
+        }
+      }
+      stack.pop();
+      state.set(taskId, "visited");
+    };
+
+    for (const task of tasks) {
+      visit(task.task_id);
+    }
+
+    return cycles;
+  }
+
+  private wouldCreateDependencyCycle(
+    projectId: string,
+    taskId: string,
+    dependencies: string[]
+  ): boolean {
+    const existingDependencies =
+      this.taskRepository.findAllDependenciesForProject(projectId);
+    const dependencyMap = this.buildDependencyMap(
+      existingDependencies.filter((dependency) => dependency.task_id !== taskId)
+    );
+    dependencyMap.set(taskId, dependencies);
+    return dependencies.some((dependencyId) =>
+      this.hasDependencyPath(dependencyId, taskId, dependencyMap)
+    );
+  }
+
+  private hasDependencyPath(
+    startTaskId: string,
+    targetTaskId: string,
+    dependencyMap: Map<string, string[]>,
+    visited = new Set<string>()
+  ): boolean {
+    if (startTaskId === targetTaskId) {
+      return true;
+    }
+    if (visited.has(startTaskId)) {
+      return false;
+    }
+    visited.add(startTaskId);
+    return (dependencyMap.get(startTaskId) ?? []).some((dependencyId) =>
+      this.hasDependencyPath(dependencyId, targetTaskId, dependencyMap, visited)
+    );
   }
 
   private validateWorkItemPlacement(

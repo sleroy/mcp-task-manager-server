@@ -40,7 +40,7 @@ const baseTaskSchema = z.object({
   description: z
     .string()
     .min(1, "Task description cannot be empty.")
-    .max(1024, "Task description cannot exceed 1024 characters."),
+    .max(8192, "Task description cannot exceed 8192 characters."),
   status: taskStatusEnum,
   priority: taskPriorityEnum,
   created_at: z

@@ -20,7 +20,7 @@ This server acts as a persistent backend for local MCP clients (like AI agents o
 - **Work Item Management:** Supports lightweight parent-child hierarchy, dependencies, status changes, and next actionable task selection without requiring a complex project-management workflow.
 - **Sprint Management:** Supports sprint planning, activation, filtered backlog assignment, progress reporting, and closing sprints with their assigned work.
 - **Import/Export:** Allows exporting project data to JSON, writing a local JSON snapshot, and importing from JSON to create new projects.
-- **Web Report Server:** Provides an MCP tool that starts a local, read-only HTTP server serving a navigable web UI to browse all projects, per-project progress, the epic/story/task hierarchy, sprints, and milestones.
+- **Web Report Server:** Provides an MCP tool that starts a local, read-only HTTP server serving a navigable web UI to browse all projects, per-project progress, the epic/story/task hierarchy, sprints, and milestones. Work items can be filtered by status (open/closed/all), descriptions render as Markdown, and milestones are clickable to list their associated work items.
 - **WAL Checkpointing:** Provides an MCP tool and npm command to flush SQLite WAL changes before committing a tracked database file, and fails loudly if SQLite reports an incomplete checkpoint.
 
 ## Work Model
@@ -35,6 +35,10 @@ The server intentionally keeps the project-management model lightweight. A `proj
 
 The server validates only the structural rules needed to keep data coherent: epics are top-level, stories can be parented by epics, tasks can be parented by stories or epics, and epics are not assigned directly to sprints.
 
+> **Milestones vs. Sprints — pick one.** Milestones and sprints are two alternative ways to group work for planning. Use _either_ milestones _or_ sprints for a given body of work, never both. Combining them on the same work items leads to duplicated planning and duplicated tasks. Tool parameter descriptions repeat this guidance so MCP clients and agents surface it at call time.
+
+> **Descriptions can be agent prompts.** Work item descriptions accept up to 8192 characters, so a description can be a short summary or a detailed, self-contained prompt (context, acceptance criteria, constraints, and steps) that a coding agent can act on directly.
+
 ## Implemented MCP Tools
 
 The following tools are available for MCP clients:
@@ -45,7 +49,7 @@ The following tools are available for MCP clients:
   - **Returns:** `{ project_id: string }`
 - **`addTask`**:
   - **Description:** Adds a new work item to a project. Defaults to a task for backward compatibility.
-  - **Params:** `project_id` (string, required, UUID), `description` (string, required, 1-1024), `item_type` (enum 'epic'|'story'|'task', optional, default 'task'), `parent_task_id` (UUID|null, optional), `sprint_id` (UUID|null, optional), `milestone` (string|null, optional), `dependencies` (string[], optional, max 50), `priority` (enum 'high'|'medium'|'low', optional, default 'medium'), `status` (enum 'todo'|'in-progress'|'review'|'done', optional, default 'todo')
+  - **Params:** `project_id` (string, required, UUID), `description` (string, required, 1-8192; can be a coding-agent prompt), `item_type` (enum 'epic'|'story'|'task', optional, default 'task'), `parent_task_id` (UUID|null, optional), `sprint_id` (UUID|null, optional), `milestone` (string|null, optional; use milestones **or** sprints, not both), `dependencies` (string[], optional, max 50), `priority` (enum 'high'|'medium'|'low', optional, default 'medium'), `status` (enum 'todo'|'in-progress'|'review'|'done', optional, default 'todo')
   - **Returns:** Full `TaskData` object of the created task.
 - **`createEpic`**:
   - **Description:** Creates a top-level epic in a project.
@@ -153,7 +157,7 @@ The following tools are available for MCP clients:
   - **Returns:** `{ project_id: string }` of the newly created project.
 - **`updateTask`**:
   - **Description:** Updates specific details of an existing work item.
-  - **Params:** `project_id` (string, required, UUID), `task_id` (string, required, UUID), `description` (string, optional, 1-1024), `priority` (enum 'high'|'medium'|'low', optional), `parent_task_id` (UUID|null, optional), `sprint_id` (UUID|null, optional), `milestone` (string|null, optional), `dependencies` (string[], optional, max 50, replaces existing)
+  - **Params:** `project_id` (string, required, UUID), `task_id` (string, required, UUID), `description` (string, optional, 1-8192; can be a coding-agent prompt), `priority` (enum 'high'|'medium'|'low', optional), `parent_task_id` (UUID|null, optional), `sprint_id` (UUID|null, optional), `milestone` (string|null, optional; use milestones **or** sprints, not both), `dependencies` (string[], optional, max 50, replaces existing)
   - **Returns:** Updated `FullTaskData` object.
 - **`deleteTask`**:
   - **Description:** Deletes one or more tasks (and their subtasks/dependency links via cascade).
@@ -168,7 +172,7 @@ The following tools are available for MCP clients:
   - **Params:** none
   - **Returns:** `{ database_path: string, mode: 'TRUNCATE', busy: number, log: number, checkpointed: number }`
 - **`startReportServer`**:
-  - **Description:** Starts a local, read-only HTTP server that serves a navigable web report of all projects. The UI shows per-project progress and lets you drill into the epic/story/task hierarchy, sprints, and milestones. The server binds to loopback (`127.0.0.1`) by default and runs for the lifetime of the MCP server process. Calling the tool again returns the already-running URL instead of starting a second instance.
+  - **Description:** Starts a local, read-only HTTP server that serves a navigable web report of all projects. The UI shows per-project progress and lets you drill into the epic/story/task hierarchy, sprints, and milestones. Work items can be filtered by status (open / closed / all, or a specific status), descriptions render as Markdown, and milestones are clickable to reveal their associated work items. The server binds to loopback (`127.0.0.1`) by default and runs for the lifetime of the MCP server process. Calling the tool again returns the already-running URL instead of starting a second instance. The report is read-only by design: it does not expose actions to create, edit, or close work items — use the MCP tools for mutations.
   - **Params:** `port` (integer 0-65535, optional, default 0 = random free port), `host` (string, optional, default `127.0.0.1`)
   - **Returns:** `{ url: string, host: string, port: number, already_running: boolean, message: string }`
   - **API served:** `GET /` (web UI), `GET /api/projects` (overview + progress + counts), `GET /api/projects/:id` (full detail: work-item tree, sprints, milestones), `GET /api/statuses`.
