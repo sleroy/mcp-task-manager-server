@@ -16,6 +16,7 @@ import {
 // Import tool registration functions
 // import { exampleTool } from "./exampleTool.js"; // Commenting out example
 import { createProjectTool } from "./createProjectTool.js";
+import { listProjectsTool } from "./listProjectsTool.js";
 import { addTaskTool } from "./addTaskTool.js";
 import { listTasksTool } from "./listTasksTool.js";
 import { showTaskTool } from "./showTaskTool.js";
@@ -101,6 +102,7 @@ export function registerTools(server: McpServer): void {
     // exampleTool(server, configManager.getExampleServiceConfig()); // Example commented out
 
     createProjectTool(server, projectService);
+    listProjectsTool(server, projectService);
     createSprintTool(server, sprintService);
     listSprintsTool(server, sprintService);
     updateSprintTool(server, sprintService);

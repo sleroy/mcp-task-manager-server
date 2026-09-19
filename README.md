@@ -47,6 +47,10 @@ The following tools are available for MCP clients:
   - **Description:** Creates a new, empty project.
   - **Params:** `projectName` (string, optional, max 255)
   - **Returns:** `{ project_id: string }`
+- **`listProjects`**:
+  - **Description:** Lists all projects, ordered by creation date (newest first). Useful for discovering existing project IDs.
+  - **Params:** none
+  - **Returns:** Array of `{ project_id: string, name: string, created_at: string }`.
 - **`addTask`**:
   - **Description:** Adds a new work item to a project. Defaults to a task for backward compatibility.
   - **Params:** `project_id` (string, required, UUID), `description` (string, required, 1-8192; can be a coding-agent prompt), `item_type` (enum 'epic'|'story'|'task', optional, default 'task'), `parent_task_id` (UUID|null, optional), `sprint_id` (UUID|null, optional), `milestone` (string|null, optional; use milestones **or** sprints, not both), `dependencies` (string[], optional, max 50), `priority` (enum 'high'|'medium'|'low', optional, default 'medium'), `status` (enum 'todo'|'in-progress'|'review'|'done', optional, default 'todo')
