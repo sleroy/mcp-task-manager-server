@@ -130,6 +130,14 @@ export const REPORT_HTML = `<!DOCTYPE html>
   }
   .md pre code { background: none; border: none; padding: 0; }
   .md a { color: var(--accent); }
+  .node .task-id {
+    font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 1px 6px; border-radius: 4px; cursor: pointer; user-select: none;
+    background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+    flex: none; white-space: nowrap;
+  }
+  .node .task-id:hover { border-color: var(--accent); color: var(--text); }
+  .node .task-id.copied { border-color: var(--done); color: var(--done); }
   .node .prio { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
   .prio-high { background: #ef444422; color: #fca5a5; }
   .prio-medium { background: #f59e0b22; color: #fcd34d; }
@@ -389,7 +397,8 @@ export const REPORT_HTML = `<!DOCTYPE html>
         '<span class="desc ' + descClass + '">' + mdInlineFirstLine(node.description) +
           (rich ? '<span class="desc-toggle" data-desc-toggle>▸ details</span>' : '') +
         '</span>' +
-        '<span class="prio prio-' + esc(node.priority) + '">' + esc(node.priority) + '</span>';
+        '<span class="prio prio-' + esc(node.priority) + '">' + esc(node.priority) + '</span>' +
+        '<span class="task-id" data-copy-id="' + esc(node.task_id) + '" title="Copy task ID: ' + esc(node.task_id) + '">' + esc(String(node.task_id || '').slice(0, 8)) + '</span>';
     if (node.item_type !== 'task') {
       html += '<span class="mini">' + bar(node.progress.progress_percent) + '</span>';
     }
@@ -401,6 +410,29 @@ export const REPORT_HTML = `<!DOCTYPE html>
       html += '<ul>' + node.subtasks.map(nodeHtml).join('') + '</ul>';
     }
     return html + '</li>';
+  }
+
+  // Copy text to the clipboard with a fallback for non-secure contexts
+  // (the report server is served over plain HTTP on loopback, where
+  // navigator.clipboard may be unavailable).
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok ? resolve() : reject(new Error('copy command failed'));
+      } catch (e) { reject(e); }
+    });
   }
 
   function attachToggles(root) {
@@ -424,6 +456,26 @@ export const REPORT_HTML = `<!DOCTYPE html>
         var hidden = body.style.display === 'none';
         body.style.display = hidden ? '' : 'none';
         tg.textContent = (hidden ? '▾' : '▸') + ' details';
+      });
+    });
+    // Copy a work item's full task ID to the clipboard on click.
+    Array.prototype.forEach.call(root.querySelectorAll('[data-copy-id]'), function (el) {
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var id = el.getAttribute('data-copy-id');
+        if (!id) { return; }
+        var original = el.textContent;
+        copyToClipboard(id).then(function () {
+          el.classList.add('copied');
+          el.textContent = 'copied';
+          setTimeout(function () {
+            el.classList.remove('copied');
+            el.textContent = original;
+          }, 1200);
+        }).catch(function () {
+          el.textContent = 'copy failed';
+          setTimeout(function () { el.textContent = original; }, 1200);
+        });
       });
     });
   }
